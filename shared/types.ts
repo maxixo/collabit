@@ -11,6 +11,7 @@ export interface DocumentSummary {
   updatedAt: string;
   ownerId: string;
   workspaceId: string;
+  isStarred: boolean;
 }
 
 export interface DocumentDetail extends DocumentSummary {

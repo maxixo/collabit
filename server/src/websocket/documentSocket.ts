@@ -83,6 +83,7 @@ const handleDocumentOpen = async (
         updatedAt: new Date().toISOString(),
         ownerId: "unknown",
         workspaceId,
+        isStarred: false,
         content: {} // TODO: Fetch actual content
       }
     };
@@ -145,6 +146,7 @@ const handleSyncRequest = async (
         updatedAt: document.updatedAt,
         ownerId: document.ownerId,
         workspaceId: document.workspaceId,
+        isStarred: document.isStarred,
         content: document.content
       }
     };

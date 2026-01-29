@@ -6,6 +6,7 @@ export interface DocumentState {
   updatedAt: string;
   ownerId: string;
   workspaceId: string;
+  isStarred: boolean;
   content: TipTapContent;
 }
 

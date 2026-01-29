@@ -4,6 +4,7 @@ import { SignIn } from "../pages/SignIn";
 import { SignUp } from "../pages/SignUp";
 import { Editor } from "../pages/Editor";
 import { Recent } from "../pages/Recent";
+import { Starred } from "../pages/Starred";
 
 export const router = createBrowserRouter([
   {
@@ -27,6 +28,14 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <Recent />
+      </ProtectedRoute>
+    )
+  },
+  {
+    path: "/editor/starred",
+    element: (
+      <ProtectedRoute>
+        <Starred />
       </ProtectedRoute>
     )
   },

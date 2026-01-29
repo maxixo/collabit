@@ -5,7 +5,9 @@ import { authMiddleware, type AuthenticatedRequest } from "../middlewares/auth.m
 import {
   createDocument,
   getDocumentById,
+  getStarredDocuments,
   listDocuments,
+  toggleStarDocument,
   updateDocument
 } from "../services/document.service.js";
 import { canEditDocument, getDocumentRole } from "../services/permission.service.js";
@@ -60,7 +62,8 @@ documentRoutes.post("/", async (req: AuthenticatedRequest, res, next) => {
       content: content ?? DEFAULT_DOCUMENT_CONTENT,
       updatedAt: new Date().toISOString(),
       ownerId: req.user?.id ?? "",
-      workspaceId
+      workspaceId,
+      isStarred: false
     };
 
     try {
@@ -74,6 +77,22 @@ documentRoutes.post("/", async (req: AuthenticatedRequest, res, next) => {
       }
       throw error;
     }
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.get("/starred", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = req.user?.id ?? "";
+    const documents = await getStarredDocuments(workspaceId, userId);
+    res.json({ documents });
   } catch (error) {
     next(error);
   }
@@ -101,6 +120,28 @@ documentRoutes.get("/:id", async (req: AuthenticatedRequest, res, next) => {
     }
 
     res.json({ document });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.patch("/:id/star", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = req.user?.id ?? "";
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!role) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const result = await toggleStarDocument(req.params.id, userId);
+    res.json({ documentId: req.params.id, isStarred: result.isStarred });
   } catch (error) {
     next(error);
   }

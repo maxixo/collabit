@@ -131,6 +131,30 @@ export const getDocument = async (id: string): Promise<DocumentState | null> => 
   return document as DocumentState;
 };
 
+export const getDocumentRecord = async (id: string): Promise<StoredDocument | null> => {
+  const result = await runTransaction(DOCUMENT_STORE, "readonly", (store) => store.get(id));
+  return (result as StoredDocument | undefined) ?? null;
+};
+
+export const updateCachedDocumentStar = async (
+  id: string,
+  isStarred: boolean,
+  fallback?: StoredDocument
+): Promise<void> => {
+  try {
+    const record = await getDocumentRecord(id);
+    if (record) {
+      await saveDocument({ ...record, isStarred });
+      return;
+    }
+    if (fallback) {
+      await saveDocument({ ...fallback, isStarred });
+    }
+  } catch {
+    // Ignore IndexedDB failures to avoid blocking UI updates.
+  }
+};
+
 export const listDocumentsByWorkspace = async (workspaceId: string): Promise<StoredDocument[]> => {
   const db = await openEditorDb();
   const tx = db.transaction(DOCUMENT_STORE, "readonly");

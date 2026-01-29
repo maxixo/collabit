@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 import { router } from "./app/routes";
+import { AppEffects } from "./app/AppEffects";
 import { AppProvider } from "./app/store";
 import { AuthProvider } from "./auth/AuthContext";
 import "./main.css";
@@ -15,6 +16,7 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <AuthProvider>
     <AppProvider>
+      <AppEffects />
       <RouterProvider router={router} />
     </AppProvider>
   </AuthProvider>

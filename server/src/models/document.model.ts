@@ -6,6 +6,7 @@ export interface DocumentSummary {
   updatedAt: string;
   ownerId: string;
   workspaceId: string;
+  isStarred: boolean;
 }
 
 export interface DocumentModel extends DocumentSummary {
@@ -47,6 +48,27 @@ const parseContent = (value: unknown): TipTapContent => {
   return DEFAULT_DOCUMENT_CONTENT;
 };
 
+const parseIsStarred = (row: Record<string, unknown>) => {
+  const value =
+    typeof row.isStarred !== "undefined"
+      ? row.isStarred
+      : typeof row.is_starred !== "undefined"
+        ? row.is_starred
+        : undefined;
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value === 1;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "t" || normalized === "1" || normalized === "yes";
+  }
+  return false;
+};
+
 export const mapDocumentSummaryRow = (_row: unknown): DocumentSummary => {
   const row = typeof _row === "object" && _row !== null ? (_row as Record<string, unknown>) : {};
   return {
@@ -59,7 +81,8 @@ export const mapDocumentSummaryRow = (_row: unknown): DocumentSummary => {
         ? row.workspaceId
         : typeof row.workspace_id === "string"
           ? row.workspace_id
-          : ""
+          : "",
+    isStarred: parseIsStarred(row)
   };
 };
 

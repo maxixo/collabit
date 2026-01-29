@@ -28,6 +28,7 @@ export interface DocumentSummary {
   updatedAt: string;
   ownerId: string;
   workspaceId: string;
+  isStarred: boolean;
 }
 
 export interface AppContextValue {
@@ -44,6 +45,7 @@ type AppAction =
   | { type: "SET_RECENT_DOCUMENTS"; payload: DocumentSummary[] }
   | { type: "ADD_RECENT_DOCUMENT"; payload: DocumentSummary }
   | { type: "UPDATE_RECENT_DOCUMENT"; payload: DocumentSummary }
+  | { type: "SET_DOCUMENT_STAR"; payload: { id: string; isStarred: boolean } }
   | { type: "SET_CONNECTION_STATUS"; payload: "online" | "offline" | "reconnecting" }
   | { type: "SET_SAVE_STATUS"; payload: "saved" | "saving" | "error" | "conflict" }
   | { type: "SET_PRESENCE"; payload: PresenceState }
@@ -85,6 +87,16 @@ const appReducer: Reducer<AppContextValue, AppAction> = (state, action) => {
         ...state,
         recentDocuments: state.recentDocuments.map(doc =>
           doc.id === action.payload.id ? action.payload : doc
+        )
+      };
+
+    case "SET_DOCUMENT_STAR":
+      return {
+        ...state,
+        recentDocuments: state.recentDocuments.map(doc =>
+          doc.id === action.payload.id
+            ? { ...doc, isStarred: action.payload.isStarred }
+            : doc
         )
       };
     
@@ -162,6 +174,7 @@ export const actions = {
   setRecentDocuments: (docs: DocumentSummary[]) => ({ type: "SET_RECENT_DOCUMENTS" as const, payload: docs }),
   addRecentDocument: (doc: DocumentSummary) => ({ type: "ADD_RECENT_DOCUMENT" as const, payload: doc }),
   updateRecentDocument: (doc: DocumentSummary) => ({ type: "UPDATE_RECENT_DOCUMENT" as const, payload: doc }),
+  setDocumentStar: (payload: { id: string; isStarred: boolean }) => ({ type: "SET_DOCUMENT_STAR" as const, payload }),
   setConnectionStatus: (status: "online" | "offline" | "reconnecting") => ({ type: "SET_CONNECTION_STATUS" as const, payload: status }),
   setSaveStatus: (status: "saved" | "saving" | "error" | "conflict") => ({ type: "SET_SAVE_STATUS" as const, payload: status }),
   setPresence: (presence: PresenceState) => ({ type: "SET_PRESENCE" as const, payload: presence }),

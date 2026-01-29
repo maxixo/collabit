@@ -16,6 +16,7 @@ export interface DocumentRecord {
   updatedAt: string;
   ownerId: string;
   workspaceId: string;
+  isStarred: boolean;
 }
 
 // TODO: Add shared payload types for API and WebSocket events.

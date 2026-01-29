@@ -6,6 +6,8 @@ import { Presence } from "../editor/Presence";
 import { useDocument } from "../hooks/useDocument";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { usePresence } from "../hooks/usePresence";
+import { useStarToggle } from "../hooks/useStarToggle";
+import { useAuth } from "../auth/AuthContext";
 import { useAppStore, actions, type Collaborator } from "../app/store";
 import { createDocument, fetchDocuments } from "../services/document.service";
 import { searchDocumentsWithFallback } from "../services/search.service";
@@ -15,6 +17,7 @@ import { EMPTY_TIPTAP_DOC } from "../utils/tiptapContent";
 import { connectWebSocket, type WebSocketManager } from "../websocket/socket.js";
 import { ClientEvent } from "@shared/events";
 import type { ServerSyncResponsePayload, ServerPresenceBroadcastPayload } from "@shared/types";
+import { subscribeToStarUpdates } from "../utils/starEvents";
 import { ConflictModal } from "../components/ConflictModal";
 import { ShareModal } from "../components/ShareModal";
 
@@ -36,6 +39,7 @@ export const Editor = () => {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const workspaceId = searchParams.get("workspaceId") ?? "default";
+  const { user, status } = useAuth();
   const collaborationRequested =
     (location.state as { collaboration?: boolean } | null)?.collaboration === true ||
     isCollaborationParam(searchParams.get("share")) ||
@@ -49,9 +53,10 @@ export const Editor = () => {
   const [collaborationDocs, setCollaborationDocs] = useState<Record<string, boolean>>({});
   const presenceDocumentId = id && (collaborationDocs[id] || collaborationRequested) ? id : null;
   const { onlineCount, collaborators, sendCursorUpdate, sendSelectionUpdate } = usePresence(presenceDocumentId);
+  const { toggleStar } = useStarToggle();
   
   // Document hooks
-  const { document, updateDocument, loading, error, saveStatus } = useDocument(id, workspaceId);
+  const { document, updateDocument, setLocalDocument, loading, error, saveStatus } = useDocument(id, workspaceId);
   const activeDocument = id ? (document?.id === id ? document : null) : document;
   const documentRef = useRef(activeDocument);
   const updateDocumentRef = useRef(updateDocument);
@@ -77,6 +82,23 @@ export const Editor = () => {
   const docTitle = activeDocument?.title ?? fallbackTitle;
   const displayTitle = docTitle.trim().length > 0 ? docTitle : "Untitled document";
   const shouldFocusTitle = Boolean((location.state as { focusTitle?: boolean } | null)?.focusTitle);
+  const userLabel = useMemo(() => {
+    if (status !== "authenticated") {
+      return "User";
+    }
+    return user?.name?.trim() || user?.email?.trim() || "User";
+  }, [status, user]);
+  const userInitial = useMemo(() => {
+    const firstWord = userLabel.split(/\s+/)[0];
+    return firstWord ? firstWord.charAt(0).toUpperCase() : "U";
+  }, [userLabel]);
+  const isRecentRoute = location.pathname === "/editor/recent";
+  const isStarredRoute = location.pathname === "/editor/starred";
+
+  const navLinkClass = (isActive: boolean) =>
+    isActive
+      ? "flex items-center gap-3 rounded-lg bg-[#e7e7f3] px-3 py-2 text-[#0d0e1b] dark:bg-[#1c1d3a] dark:text-white"
+      : "flex items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] hover:bg-[#e7e7f3]/50 dark:text-[#8a8bbd] dark:hover:bg-[#1c1d3a]/50";
   
   // Sync connection status with online status
   useEffect(() => {
@@ -203,7 +225,8 @@ export const Editor = () => {
         title: nextTitle,
         updatedAt: new Date().toISOString(),
         ownerId: currentDocument.ownerId,
-        workspaceId: currentDocument.workspaceId || workspaceId
+        workspaceId: currentDocument.workspaceId || workspaceId,
+        isStarred: currentDocument.isStarred
       }));
     }
   }, [workspaceId, dispatch]);
@@ -234,6 +257,40 @@ export const Editor = () => {
   }, [emptyContent, isCreating, navigate, workspaceId]);
 
   const documentId = id ?? activeDocument?.id ?? null;
+  const isStarred = Boolean(activeDocument?.isStarred);
+  const canToggleStar = Boolean(activeDocument && documentId);
+
+  const applyLocalStarUpdate = useCallback(
+    (nextIsStarred: boolean) => {
+      setLocalDocument((current) => {
+        if (!current) {
+          return current;
+        }
+        return { ...current, isStarred: nextIsStarred };
+      });
+    },
+    [setLocalDocument]
+  );
+
+  const handleStarToggle = useCallback(async () => {
+    if (!activeDocument || !documentId) {
+      return;
+    }
+    try {
+      await toggleStar(activeDocument, {
+        onOptimisticUpdate: applyLocalStarUpdate,
+        onFinalUpdate: applyLocalStarUpdate
+      });
+    } catch {
+      // Ignore toggle errors; UI reverts in the hook on failure.
+    }
+  }, [activeDocument, documentId, toggleStar, applyLocalStarUpdate]);
+
+  const starIconStyle = {
+    fontVariationSettings: isStarred
+      ? "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24"
+      : "'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24"
+  };
 
   const handleShareClick = useCallback(() => {
     if (!documentId) {
@@ -298,6 +355,18 @@ export const Editor = () => {
     setLocalVersion(EMPTY_TIPTAP_DOC);
     setServerVersion(EMPTY_TIPTAP_DOC);
   }, [documentId]);
+
+  useEffect(() => {
+    if (!documentId) {
+      return;
+    }
+    return subscribeToStarUpdates((update) => {
+      if (update.documentId !== documentId || update.workspaceId !== workspaceId) {
+        return;
+      }
+      applyLocalStarUpdate(update.isStarred);
+    });
+  }, [documentId, workspaceId, applyLocalStarUpdate]);
 
   // WebSocket and collaboration state
   const wsManagerRef = useRef<WebSocketManager | null>(null);
@@ -458,8 +527,9 @@ export const Editor = () => {
                 Navigation
               </p>
               <Link
-                className="flex items-center gap-3 rounded-lg bg-[#e7e7f3] px-3 py-2 text-[#0d0e1b] dark:bg-[#1c1d3a] dark:text-white"
+                className={navLinkClass(isRecentRoute)}
                 to="/editor/recent"
+                aria-current={isRecentRoute ? "page" : undefined}
               >
                 <span
                   className="material-symbols-outlined"
@@ -469,13 +539,14 @@ export const Editor = () => {
                 </span>
                 <span className="text-sm font-medium">Recent</span>
               </Link>
-              <a
-                className="flex items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] hover:bg-[#e7e7f3]/50 dark:text-[#8a8bbd] dark:hover:bg-[#1c1d3a]/50"
-                href="#"
+              <Link
+                className={navLinkClass(isStarredRoute)}
+                to="/editor/starred"
+                aria-current={isStarredRoute ? "page" : undefined}
               >
                 <span className="material-symbols-outlined">star</span>
                 <span className="text-sm font-medium">Starred</span>
-              </a>
+              </Link>
               <a
                 className="flex items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] hover:bg-[#e7e7f3]/50 dark:text-[#8a8bbd] dark:hover:bg-[#1c1d3a]/50"
                 href="#"
@@ -608,6 +679,22 @@ export const Editor = () => {
                   <span className="material-symbols-outlined">notifications</span>
                 </button>
                 <button
+                  className={`rounded-lg p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isStarred
+                      ? "text-amber-400 hover:text-amber-500 dark:text-amber-300"
+                      : "text-[#4c4d9a] hover:bg-background-light dark:text-[#8a8bbd] dark:hover:bg-[#1c1d3a]"
+                  }`}
+                  type="button"
+                  onClick={handleStarToggle}
+                  disabled={!canToggleStar}
+                  aria-pressed={isStarred}
+                  aria-label={isStarred ? "Unstar document" : "Star document"}
+                >
+                  <span className="material-symbols-outlined" style={starIconStyle}>
+                    star
+                  </span>
+                </button>
+                <button
                   className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-bold text-white shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                   type="button"
                   onClick={handleShareClick}
@@ -615,6 +702,17 @@ export const Editor = () => {
                   <span className="material-symbols-outlined !text-[18px]">share</span>
                   <span>Share</span>
                 </button>
+                <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[#e7e7f3] text-sm font-bold text-[#4c4d9a] dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9]">
+                  {user?.image ? (
+                    <img
+                      className="h-full w-full object-cover"
+                      src={user.image}
+                      alt={`${userLabel} profile`}
+                    />
+                  ) : (
+                    <span aria-hidden="true">{userInitial}</span>
+                  )}
+                </div>
               </div>
             </div>
           </header>

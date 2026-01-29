@@ -4,6 +4,7 @@ export type DocumentSchemaInfo = {
   hasWorkspaceId: boolean;
   contentType: "jsonb" | "text";
   hasDocumentMembers: boolean;
+  hasStarredDocuments: boolean;
 };
 
 let cachedSchema: DocumentSchemaInfo | null = null;
@@ -27,10 +28,14 @@ export const getDocumentSchemaInfo = async (): Promise<DocumentSchemaInfo> => {
 
   schemaPromise = (async () => {
     const tableResult = await db.query(
-      "SELECT to_regclass('public.documents') AS documents, to_regclass('public.document_members') AS document_members"
+      "SELECT to_regclass('public.documents') AS documents, to_regclass('public.document_members') AS document_members, to_regclass('public.starred_documents') AS starred_documents"
     );
 
-    const tables = tableResult.rows[0] as { documents?: string | null; document_members?: string | null };
+    const tables = tableResult.rows[0] as {
+      documents?: string | null;
+      document_members?: string | null;
+      starred_documents?: string | null;
+    };
     if (!tables?.documents) {
       throw new Error("Documents table is missing. Run the database schema setup.");
     }
@@ -54,7 +59,8 @@ export const getDocumentSchemaInfo = async (): Promise<DocumentSchemaInfo> => {
     return {
       hasWorkspaceId,
       contentType,
-      hasDocumentMembers: Boolean(tables?.document_members)
+      hasDocumentMembers: Boolean(tables?.document_members),
+      hasStarredDocuments: Boolean(tables?.starred_documents)
     };
   })();
 

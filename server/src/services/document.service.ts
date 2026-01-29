@@ -28,14 +28,21 @@ export const listDocuments = async (
   const visibilityClause = schema.hasDocumentMembers
     ? `(d.owner_id = ${userParam} OR m.user_id = ${userParam})`
     : `d.owner_id = ${userParam}`;
+  const starJoin = schema.hasStarredDocuments
+    ? `LEFT JOIN starred_documents s ON d.id = s.document_id AND s.user_id = ${userParam}`
+    : "";
+  const starSelect = schema.hasStarredDocuments
+    ? "COALESCE(s.document_id IS NOT NULL, false) AS is_starred"
+    : "FALSE AS is_starred";
   const workspaceClause = schema.hasWorkspaceId ? `AND d.workspace_id = ${workspaceParam}` : "";
   const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : `${workspaceParam} AS workspace_id`;
 
   const { rows } = await db.query(
     `
-      SELECT d.id, d.title, d.updated_at, d.owner_id, ${workspaceSelect}
+      SELECT d.id, d.title, d.updated_at, d.owner_id, ${workspaceSelect}, ${starSelect}
       FROM documents d
       ${joinClause}
+      ${starJoin}
       WHERE ${visibilityClause}
       ${workspaceClause}
       ORDER BY d.updated_at DESC
@@ -63,14 +70,21 @@ export const getDocumentById = async (
   const visibilityClause = schema.hasDocumentMembers
     ? `(d.owner_id = ${userParam} OR m.user_id = ${userParam})`
     : `d.owner_id = ${userParam}`;
+  const starJoin = schema.hasStarredDocuments
+    ? `LEFT JOIN starred_documents s ON d.id = s.document_id AND s.user_id = ${userParam}`
+    : "";
+  const starSelect = schema.hasStarredDocuments
+    ? "COALESCE(s.document_id IS NOT NULL, false) AS is_starred"
+    : "FALSE AS is_starred";
   const workspaceClause = schema.hasWorkspaceId ? `AND d.workspace_id = ${workspaceParam}` : "";
   const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : `${workspaceParam} AS workspace_id`;
 
   const { rows } = await db.query(
     `
-      SELECT d.id, d.title, d.content, d.updated_at, d.owner_id, ${workspaceSelect}
+      SELECT d.id, d.title, d.content, d.updated_at, d.owner_id, ${workspaceSelect}, ${starSelect}
       FROM documents d
       ${joinClause}
+      ${starJoin}
       WHERE d.id = ${idParam}
         AND ${visibilityClause}
       ${workspaceClause}
@@ -198,4 +212,90 @@ export const updateDocument = async (payload: {
     document.workspaceId = payload.workspaceId;
   }
   return document;
+};
+
+export const toggleStarDocument = async (
+  documentId: string,
+  userId: string
+): Promise<{ isStarred: boolean }> => {
+  const schema = await getDocumentSchemaInfo();
+  if (!schema.hasStarredDocuments) {
+    throw new Error("Starred documents table is not available.");
+  }
+
+  const { params, addParam } = createParamBuilder();
+  const documentParam = addParam(documentId);
+  const userParam = addParam(userId);
+
+  const { rows } = await db.query(
+    `
+      SELECT 1
+      FROM starred_documents
+      WHERE document_id = ${documentParam}
+        AND user_id = ${userParam}
+      LIMIT 1
+    `,
+    params
+  );
+
+  if (rows.length > 0) {
+    await db.query(
+      `
+        DELETE FROM starred_documents
+        WHERE document_id = ${documentParam}
+          AND user_id = ${userParam}
+      `,
+      params
+    );
+    return { isStarred: false };
+  }
+
+  await db.query(
+    `
+      INSERT INTO starred_documents (document_id, user_id)
+      VALUES (${documentParam}, ${userParam})
+      ON CONFLICT (document_id, user_id) DO NOTHING
+    `,
+    params
+  );
+
+  return { isStarred: true };
+};
+
+export const getStarredDocuments = async (
+  workspaceId: string,
+  userId: string
+): Promise<DocumentSummary[]> => {
+  const schema = await getDocumentSchemaInfo();
+  if (!schema.hasStarredDocuments) {
+    return [];
+  }
+
+  const { params, addParam } = createParamBuilder();
+  const userParam = addParam(userId);
+  const workspaceParam = addParam(workspaceId);
+
+  const joinClause = schema.hasDocumentMembers
+    ? `LEFT JOIN document_members m ON d.id = m.document_id AND m.user_id = ${userParam}`
+    : "";
+  const visibilityClause = schema.hasDocumentMembers
+    ? `(d.owner_id = ${userParam} OR m.user_id = ${userParam})`
+    : `d.owner_id = ${userParam}`;
+  const workspaceClause = schema.hasWorkspaceId ? `AND d.workspace_id = ${workspaceParam}` : "";
+  const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : `${workspaceParam} AS workspace_id`;
+
+  const { rows } = await db.query(
+    `
+      SELECT d.id, d.title, d.updated_at, d.owner_id, ${workspaceSelect}, TRUE AS is_starred
+      FROM documents d
+      JOIN starred_documents s ON d.id = s.document_id AND s.user_id = ${userParam}
+      ${joinClause}
+      WHERE ${visibilityClause}
+      ${workspaceClause}
+      ORDER BY d.updated_at DESC
+    `,
+    params
+  );
+
+  return rows.map(mapDocumentSummaryRow);
 };

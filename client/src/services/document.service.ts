@@ -13,6 +13,7 @@ export interface DocumentSummary {
   updatedAt: string;
   ownerId: string;
   workspaceId: string;
+  isStarred: boolean;
 }
 
 export interface DocumentDetail extends DocumentSummary {
@@ -57,6 +58,25 @@ export const fetchDocuments = async (workspaceId: string): Promise<DocumentSumma
   }
 };
 
+export const fetchStarredDocuments = async (workspaceId: string): Promise<DocumentSummary[]> => {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/documents/starred?workspaceId=${encodeURIComponent(workspaceId)}`,
+      { credentials: "include" }
+    );
+    const data = await parseJson<{ documents: DocumentSummary[] }>(response);
+    const documents = data.documents ?? [];
+    await safeStore(() => saveDocuments(documents));
+    return documents;
+  } catch (error) {
+    if (!navigator.onLine) {
+      const documents = await listDocumentsByWorkspace(workspaceId);
+      return documents.filter((doc) => doc.isStarred);
+    }
+    throw error;
+  }
+};
+
 export const fetchDocumentById = async (
   id: string,
   workspaceId: string,
@@ -85,6 +105,23 @@ export const fetchDocumentById = async (
     }
     throw error;
   }
+};
+
+export const toggleStarDocument = async (
+  documentId: string,
+  workspaceId: string
+): Promise<{ documentId: string; isStarred: boolean }> => {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/star?workspaceId=${encodeURIComponent(
+      workspaceId
+    )}`,
+    {
+      method: "PATCH",
+      credentials: "include"
+    }
+  );
+
+  return await parseJson<{ documentId: string; isStarred: boolean }>(response);
 };
 
 export const createDocument = async (payload: {

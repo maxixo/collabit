@@ -177,9 +177,25 @@ export const useDocument = (documentId?: string, workspaceId?: string) => {
     [debouncedIndexUpdate, debouncedPersist]
   );
 
+  const setLocalDocument = useCallback(
+    (next: DocumentState | ((current: DocumentState | null) => DocumentState | null)) => {
+      setDocument((current) => {
+        const resolved = typeof next === "function"
+          ? (next as (value: DocumentState | null) => DocumentState | null)(current)
+          : next;
+        if (resolved) {
+          void cacheDocument(resolved).catch(() => undefined);
+        }
+        return resolved;
+      });
+    },
+    []
+  );
+
   return {
     document,
     updateDocument: updateDocumentState,
+    setLocalDocument,
     loading,
     error,
     saveStatus,

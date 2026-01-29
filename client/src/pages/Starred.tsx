@@ -1,19 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { useAppStore, actions } from "../app/store";
+import { useAppStore } from "../app/store";
 import { useAuth } from "../auth/AuthContext";
 import { useStarToggle } from "../hooks/useStarToggle";
-import { fetchDocuments } from "../services/document.service";
+import { fetchStarredDocuments, type DocumentSummary } from "../services/document.service";
+import { subscribeToStarUpdates } from "../utils/starEvents";
 
-export const Recent = () => {
-  const { recentDocuments, dispatch } = useAppStore();
+export const Starred = () => {
+  const { recentDocuments } = useAppStore();
   const { user, status } = useAuth();
   const location = useLocation();
   const { toggleStar } = useStarToggle();
   const [searchParams] = useSearchParams();
   const workspaceId = searchParams.get("workspaceId") ?? "default";
   const [isSyncing, setIsSyncing] = useState(false);
-  const showSkeleton = isSyncing && recentDocuments.length === 0;
+  const [starredDocuments, setStarredDocuments] = useState<DocumentSummary[]>([]);
+  const showSkeleton = isSyncing && starredDocuments.length === 0;
+  const recentDocumentsRef = useRef(recentDocuments);
+
+  useEffect(() => {
+    recentDocumentsRef.current = recentDocuments;
+  }, [recentDocuments]);
+
   const userLabel = useMemo(() => {
     if (status !== "authenticated") {
       return "User";
@@ -32,32 +40,57 @@ export const Recent = () => {
       ? "flex items-center gap-3 rounded-lg bg-[#e7e7f3] px-3 py-2 text-primary dark:bg-primary/20"
       : "flex items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] transition-colors hover:bg-[#f0f0f7] dark:text-[#a1a1c9] dark:hover:bg-white/5";
 
+  const updateStarredList = useCallback(
+    (documentId: string, nextIsStarred: boolean, fallback?: DocumentSummary) => {
+      setStarredDocuments((previous) => {
+        if (nextIsStarred) {
+          const exists = previous.some((doc) => doc.id === documentId);
+          if (exists) {
+            return previous.map((doc) =>
+              doc.id === documentId ? { ...doc, isStarred: true } : doc
+            );
+          }
+          if (fallback) {
+            return [{ ...fallback, isStarred: true }, ...previous];
+          }
+          return previous;
+        }
+        return previous.filter((doc) => doc.id !== documentId);
+      });
+    },
+    []
+  );
+
   const handleToggleStar = useCallback(
-    async (documentId: string) => {
-      const doc = recentDocuments.find((item) => item.id === documentId);
-      if (!doc) {
-        return;
-      }
+    async (doc: DocumentSummary) => {
+      const nextIsStarred = !doc.isStarred;
+      updateStarredList(doc.id, nextIsStarred, { ...doc, isStarred: nextIsStarred });
       try {
-        await toggleStar(doc);
+        await toggleStar(doc, {
+          onFinalUpdate: (finalIsStarred) => {
+            if (finalIsStarred !== nextIsStarred) {
+              updateStarredList(doc.id, finalIsStarred, { ...doc, isStarred: finalIsStarred });
+            }
+          }
+        });
       } catch {
-        // Ignore toggle errors; optimistic update is reverted in the hook.
+        updateStarredList(doc.id, doc.isStarred, doc);
       }
     },
-    [recentDocuments, toggleStar]
+    [toggleStar, updateStarredList]
   );
 
   useEffect(() => {
     let isActive = true;
 
-    const loadRecentDocuments = async () => {
+    const loadStarredDocuments = async () => {
       setIsSyncing(true);
       try {
-        const docs = await fetchDocuments(workspaceId);
+        const docs = await fetchStarredDocuments(workspaceId);
         if (!isActive) {
           return;
         }
-        dispatch(actions.setRecentDocuments(docs));
+        setStarredDocuments(docs);
       } catch {
         if (!isActive) {
           return;
@@ -69,12 +102,26 @@ export const Recent = () => {
       }
     };
 
-    void loadRecentDocuments();
+    void loadStarredDocuments();
 
     return () => {
       isActive = false;
     };
-  }, [workspaceId, dispatch]);
+  }, [workspaceId]);
+
+  useEffect(() => {
+    return subscribeToStarUpdates((update) => {
+      if (update.workspaceId !== workspaceId) {
+        return;
+      }
+      const fallback = recentDocumentsRef.current.find((doc) => doc.id === update.documentId);
+      updateStarredList(
+        update.documentId,
+        update.isStarred,
+        fallback ? { ...fallback, isStarred: update.isStarred } : undefined
+      );
+    });
+  }, [workspaceId, updateStarredList]);
 
   return (
     <div className="bg-background-light text-[#0d0e1b] dark:bg-background-dark dark:text-[#f8f8fc] font-['Inter',_sans-serif]">
@@ -159,7 +206,7 @@ export const Recent = () => {
                 <div className="flex flex-col">
                   <p className="text-sm font-bold leading-none text-[#0d0e1b] dark:text-white">Syncing...</p>
                   <p className="mt-1 text-xs text-[#4c4d9a] dark:text-[#a1a1c9]">
-                    Updating your latest changes
+                    Updating your starred list
                   </p>
                 </div>
                 <button className="ml-auto text-[#cfd0e7] transition-colors hover:text-primary" type="button">
@@ -208,8 +255,8 @@ export const Recent = () => {
           <div className="p-8">
             <div className="mb-8 flex items-end justify-between">
               <div>
-                <h2 className="mb-2 text-3xl font-black tracking-tight">Recent Documents</h2>
-                <p className="text-[#4c4d9a] dark:text-[#a1a1c9]">Manage and edit your workspace files</p>
+                <h2 className="mb-2 text-3xl font-black tracking-tight">Starred Documents</h2>
+                <p className="text-[#4c4d9a] dark:text-[#a1a1c9]">Keep your essentials close at hand</p>
               </div>
               <div className="flex gap-2">
                 <div className="skeleton-shimmer h-9 w-24 rounded-lg bg-[#e7e7f3] dark:bg-[#1e1f3a]"></div>
@@ -221,7 +268,7 @@ export const Recent = () => {
               {showSkeleton ? (
                 Array.from({ length: 8 }).map((_, index) => (
                   <div
-                    key={`recent-skeleton-${index}`}
+                    key={`starred-skeleton-${index}`}
                     className="group flex flex-col gap-4 rounded-xl border border-[#e7e7f3] bg-white p-4 dark:border-[#2a2b4a] dark:bg-[#16172d]"
                   >
                     <div className="skeleton-shimmer aspect-[4/3] w-full rounded-lg bg-[#e7e7f3] dark:bg-[#1e1f3a]"></div>
@@ -231,8 +278,8 @@ export const Recent = () => {
                     </div>
                   </div>
                 ))
-              ) : recentDocuments.length > 0 ? (
-                recentDocuments.map((doc) => {
+              ) : starredDocuments.length > 0 ? (
+                starredDocuments.map((doc) => {
                   const title = doc.title?.trim() ? doc.title : "Untitled document";
                   const updatedAtLabel = doc.updatedAt
                     ? new Date(doc.updatedAt).toLocaleDateString()
@@ -256,7 +303,7 @@ export const Recent = () => {
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          void handleToggleStar(doc.id);
+                          void handleToggleStar(doc);
                         }}
                       >
                         <span
@@ -284,7 +331,7 @@ export const Recent = () => {
                 })
               ) : (
                 <div className="col-span-full rounded-xl border border-dashed border-[#e7e7f3] p-6 text-center text-sm text-[#4c4d9a] dark:border-[#2a2b4a] dark:text-[#a1a1c9]">
-                  No recent documents yet.
+                  No starred documents yet.
                 </div>
               )}
             </div>
