@@ -4,9 +4,14 @@ import type { DocumentModel } from "../models/document.model.js";
 import { authMiddleware, type AuthenticatedRequest } from "../middlewares/auth.middleware.js";
 import {
   createDocument,
+  emptyTrash,
   getDocumentById,
   getStarredDocuments,
+  getTrashDocuments,
   listDocuments,
+  moveToTrash,
+  permanentlyDeleteDocument,
+  restoreFromTrash,
   toggleStarDocument,
   updateDocument
 } from "../services/document.service.js";
@@ -98,6 +103,38 @@ documentRoutes.get("/starred", async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
+documentRoutes.get("/trash", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = req.user?.id ?? "";
+    const documents = await getTrashDocuments(workspaceId, userId);
+    res.json({ documents });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.delete("/trash", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = req.user?.id ?? "";
+    const deletedCount = await emptyTrash(workspaceId, userId);
+    res.json({ deletedCount });
+  } catch (error) {
+    next(error);
+  }
+});
+
 documentRoutes.get("/:id", async (req: AuthenticatedRequest, res, next) => {
   try {
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
@@ -120,6 +157,87 @@ documentRoutes.get("/:id", async (req: AuthenticatedRequest, res, next) => {
     }
 
     res.json({ document });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.patch("/:id/trash", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = req.user?.id ?? "";
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!canEditDocument(role)) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const trashed = await moveToTrash(req.params.id, workspaceId, userId);
+    if (!trashed) {
+      res.status(404).json({ message: "Document not found" });
+      return;
+    }
+
+    res.json({ documentId: req.params.id, trashed: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.patch("/:id/restore", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = req.user?.id ?? "";
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!canEditDocument(role)) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const restored = await restoreFromTrash(req.params.id, workspaceId, userId);
+    if (!restored) {
+      res.status(404).json({ message: "Document not found" });
+      return;
+    }
+
+    res.json({ documentId: req.params.id, restored: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.delete("/:id", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = req.user?.id ?? "";
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (role !== "owner") {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const deleted = await permanentlyDeleteDocument(req.params.id, workspaceId, userId);
+    if (!deleted) {
+      res.status(404).json({ message: "Document not found" });
+      return;
+    }
+
+    res.json({ documentId: req.params.id, deleted: true });
   } catch (error) {
     next(error);
   }

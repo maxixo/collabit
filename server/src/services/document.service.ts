@@ -1,7 +1,7 @@
 import { db } from "../config/db.js";
 import type { DocumentModel, DocumentSummary, TipTapContent } from "../models/document.model.js";
 import { mapDocumentRow, mapDocumentSummaryRow } from "../models/document.model.js";
-import { getDocumentSchemaInfo } from "./documentSchema.service.js";
+import { getDocumentSchemaInfo, type DocumentSchemaInfo } from "./documentSchema.service.js";
 
 const createParamBuilder = () => {
   const params: Array<unknown> = [];
@@ -11,6 +11,13 @@ const createParamBuilder = () => {
   };
 
   return { params, addParam };
+};
+
+const buildVisibilityClause = (schema: DocumentSchemaInfo, userParam: string) => {
+  if (!schema.hasDocumentMembers) {
+    return `d.owner_id = ${userParam}`;
+  }
+  return `(d.owner_id = ${userParam} OR EXISTS (SELECT 1 FROM document_members m WHERE m.document_id = d.id AND m.user_id = ${userParam}))`;
 };
 
 export const listDocuments = async (
@@ -36,6 +43,7 @@ export const listDocuments = async (
     : "FALSE AS is_starred";
   const workspaceClause = schema.hasWorkspaceId ? `AND d.workspace_id = ${workspaceParam}` : "";
   const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : `${workspaceParam} AS workspace_id`;
+  const deletedClause = schema.hasDeletedAt ? "AND d.deleted_at IS NULL" : "";
 
   const { rows } = await db.query(
     `
@@ -45,6 +53,7 @@ export const listDocuments = async (
       ${starJoin}
       WHERE ${visibilityClause}
       ${workspaceClause}
+      ${deletedClause}
       ORDER BY d.updated_at DESC
     `,
     params
@@ -78,6 +87,7 @@ export const getDocumentById = async (
     : "FALSE AS is_starred";
   const workspaceClause = schema.hasWorkspaceId ? `AND d.workspace_id = ${workspaceParam}` : "";
   const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : `${workspaceParam} AS workspace_id`;
+  const deletedClause = schema.hasDeletedAt ? "AND d.deleted_at IS NULL" : "";
 
   const { rows } = await db.query(
     `
@@ -88,6 +98,7 @@ export const getDocumentById = async (
       WHERE d.id = ${idParam}
         AND ${visibilityClause}
       ${workspaceClause}
+      ${deletedClause}
       LIMIT 1
     `,
     params
@@ -186,6 +197,7 @@ export const updateDocument = async (payload: {
     const workspaceParam = addParam(payload.workspaceId);
     workspaceClause = `AND workspace_id = ${workspaceParam}`;
   }
+  const deletedClause = schema.hasDeletedAt ? "AND deleted_at IS NULL" : "";
   const returningFields = schema.hasWorkspaceId
     ? "id, title, content, updated_at, owner_id, workspace_id"
     : "id, title, content, updated_at, owner_id";
@@ -198,6 +210,7 @@ export const updateDocument = async (payload: {
           updated_at = NOW()
       WHERE id = ${idParam}
       ${workspaceClause}
+      ${deletedClause}
       RETURNING ${returningFields}
     `,
     params
@@ -283,6 +296,7 @@ export const getStarredDocuments = async (
     : `d.owner_id = ${userParam}`;
   const workspaceClause = schema.hasWorkspaceId ? `AND d.workspace_id = ${workspaceParam}` : "";
   const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : `${workspaceParam} AS workspace_id`;
+  const deletedClause = schema.hasDeletedAt ? "AND d.deleted_at IS NULL" : "";
 
   const { rows } = await db.query(
     `
@@ -292,10 +306,184 @@ export const getStarredDocuments = async (
       ${joinClause}
       WHERE ${visibilityClause}
       ${workspaceClause}
+      ${deletedClause}
       ORDER BY d.updated_at DESC
     `,
     params
   );
 
   return rows.map(mapDocumentSummaryRow);
+};
+
+export const moveToTrash = async (
+  documentId: string,
+  workspaceId: string,
+  userId: string
+): Promise<boolean> => {
+  const schema = await getDocumentSchemaInfo();
+  if (!schema.hasDeletedAt) {
+    throw new Error("Soft delete is not available. Run the latest migrations.");
+  }
+
+  const { params, addParam } = createParamBuilder();
+  const idParam = addParam(documentId);
+  const userParam = addParam(userId);
+  let workspaceClause = "";
+  if (schema.hasWorkspaceId) {
+    const workspaceParam = addParam(workspaceId);
+    workspaceClause = `AND d.workspace_id = ${workspaceParam}`;
+  }
+  const visibilityClause = buildVisibilityClause(schema, userParam);
+
+  const result = await db.query(
+    `
+      UPDATE documents d
+      SET deleted_at = NOW()
+      WHERE d.id = ${idParam}
+        AND ${visibilityClause}
+      ${workspaceClause}
+    `,
+    params
+  );
+
+  return result.rowCount > 0;
+};
+
+export const restoreFromTrash = async (
+  documentId: string,
+  workspaceId: string,
+  userId: string
+): Promise<boolean> => {
+  const schema = await getDocumentSchemaInfo();
+  if (!schema.hasDeletedAt) {
+    throw new Error("Soft delete is not available. Run the latest migrations.");
+  }
+
+  const { params, addParam } = createParamBuilder();
+  const idParam = addParam(documentId);
+  const userParam = addParam(userId);
+  let workspaceClause = "";
+  if (schema.hasWorkspaceId) {
+    const workspaceParam = addParam(workspaceId);
+    workspaceClause = `AND d.workspace_id = ${workspaceParam}`;
+  }
+  const visibilityClause = buildVisibilityClause(schema, userParam);
+
+  const result = await db.query(
+    `
+      UPDATE documents d
+      SET deleted_at = NULL
+      WHERE d.id = ${idParam}
+        AND ${visibilityClause}
+      ${workspaceClause}
+    `,
+    params
+  );
+
+  return result.rowCount > 0;
+};
+
+export const permanentlyDeleteDocument = async (
+  documentId: string,
+  workspaceId: string,
+  userId: string
+): Promise<boolean> => {
+  const schema = await getDocumentSchemaInfo();
+  if (!schema.hasDeletedAt) {
+    throw new Error("Soft delete is not available. Run the latest migrations.");
+  }
+
+  const { params, addParam } = createParamBuilder();
+  const idParam = addParam(documentId);
+  const userParam = addParam(userId);
+  let workspaceClause = "";
+  if (schema.hasWorkspaceId) {
+    const workspaceParam = addParam(workspaceId);
+    workspaceClause = `AND d.workspace_id = ${workspaceParam}`;
+  }
+
+  const result = await db.query(
+    `
+      DELETE FROM documents d
+      WHERE d.id = ${idParam}
+        AND d.owner_id = ${userParam}
+        AND d.deleted_at IS NOT NULL
+      ${workspaceClause}
+    `,
+    params
+  );
+
+  return result.rowCount > 0;
+};
+
+export const getTrashDocuments = async (
+  workspaceId: string,
+  userId: string
+): Promise<DocumentSummary[]> => {
+  const schema = await getDocumentSchemaInfo();
+  if (!schema.hasDeletedAt) {
+    throw new Error("Soft delete is not available. Run the latest migrations.");
+  }
+
+  const { params, addParam } = createParamBuilder();
+  const userParam = addParam(userId);
+  const workspaceParam = addParam(workspaceId);
+
+  const joinClause = schema.hasDocumentMembers
+    ? `LEFT JOIN document_members m ON d.id = m.document_id AND m.user_id = ${userParam}`
+    : "";
+  const visibilityClause = schema.hasDocumentMembers
+    ? `(d.owner_id = ${userParam} OR m.user_id = ${userParam})`
+    : `d.owner_id = ${userParam}`;
+  const starJoin = schema.hasStarredDocuments
+    ? `LEFT JOIN starred_documents s ON d.id = s.document_id AND s.user_id = ${userParam}`
+    : "";
+  const starSelect = schema.hasStarredDocuments
+    ? "COALESCE(s.document_id IS NOT NULL, false) AS is_starred"
+    : "FALSE AS is_starred";
+  const workspaceClause = schema.hasWorkspaceId ? `AND d.workspace_id = ${workspaceParam}` : "";
+  const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : `${workspaceParam} AS workspace_id`;
+
+  const { rows } = await db.query(
+    `
+      SELECT d.id, d.title, d.updated_at, d.owner_id, ${workspaceSelect}, ${starSelect}
+      FROM documents d
+      ${joinClause}
+      ${starJoin}
+      WHERE ${visibilityClause}
+        AND d.deleted_at IS NOT NULL
+      ${workspaceClause}
+      ORDER BY d.deleted_at DESC
+    `,
+    params
+  );
+
+  return rows.map(mapDocumentSummaryRow);
+};
+
+export const emptyTrash = async (workspaceId: string, userId: string): Promise<number> => {
+  const schema = await getDocumentSchemaInfo();
+  if (!schema.hasDeletedAt) {
+    throw new Error("Soft delete is not available. Run the latest migrations.");
+  }
+
+  const { params, addParam } = createParamBuilder();
+  const userParam = addParam(userId);
+  let workspaceClause = "";
+  if (schema.hasWorkspaceId) {
+    const workspaceParam = addParam(workspaceId);
+    workspaceClause = `AND d.workspace_id = ${workspaceParam}`;
+  }
+
+  const result = await db.query(
+    `
+      DELETE FROM documents d
+      WHERE d.owner_id = ${userParam}
+        AND d.deleted_at IS NOT NULL
+      ${workspaceClause}
+    `,
+    params
+  );
+
+  return result.rowCount ?? 0;
 };

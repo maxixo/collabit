@@ -6,7 +6,7 @@ import { useStarToggle } from "../hooks/useStarToggle";
 import { fetchDocuments } from "../services/document.service";
 
 export const Recent = () => {
-  const { recentDocuments, dispatch } = useAppStore();
+  const { recentDocuments, activeDocumentId, dispatch } = useAppStore();
   const { user, status } = useAuth();
   const location = useLocation();
   const { toggleStar } = useStarToggle();
@@ -26,6 +26,22 @@ export const Recent = () => {
   }, [userLabel]);
   const isRecentRoute = location.pathname === "/editor/recent";
   const isStarredRoute = location.pathname === "/editor/starred";
+  const homeDocument = useMemo(() => {
+    if (activeDocumentId) {
+      return (
+        recentDocuments.find((doc) => doc.id === activeDocumentId) ?? {
+          id: activeDocumentId,
+          workspaceId
+        }
+      );
+    }
+    return recentDocuments[0] ?? null;
+  }, [activeDocumentId, recentDocuments, workspaceId]);
+  const homeHref = homeDocument
+    ? `/editor/${encodeURIComponent(homeDocument.id)}?workspaceId=${encodeURIComponent(
+        homeDocument.workspaceId || workspaceId
+      )}`
+    : "/editor/recent";
 
   const navLinkClass = (isActive: boolean) =>
     isActive
@@ -100,7 +116,7 @@ export const Recent = () => {
             </button>
 
             <nav className="flex flex-col gap-1">
-              <Link className={navLinkClass(false)} to="/">
+              <Link className={navLinkClass(false)} to={homeHref}>
                 <span className="material-symbols-outlined">home</span>
                 <p className="text-sm font-semibold">Home</p>
               </Link>

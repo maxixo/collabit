@@ -5,6 +5,7 @@ export type DocumentSchemaInfo = {
   contentType: "jsonb" | "text";
   hasDocumentMembers: boolean;
   hasStarredDocuments: boolean;
+  hasDeletedAt: boolean;
 };
 
 let cachedSchema: DocumentSchemaInfo | null = null;
@@ -46,7 +47,7 @@ export const getDocumentSchemaInfo = async (): Promise<DocumentSchemaInfo> => {
         FROM information_schema.columns
         WHERE table_schema = 'public'
           AND table_name = 'documents'
-          AND column_name IN ('workspace_id', 'content')
+          AND column_name IN ('workspace_id', 'content', 'deleted_at')
       `
     );
 
@@ -55,12 +56,14 @@ export const getDocumentSchemaInfo = async (): Promise<DocumentSchemaInfo> => {
     const contentType = normalizeContentType(
       columns.find((column) => column.column_name === "content")?.data_type
     );
+    const hasDeletedAt = columns.some((column) => column.column_name === "deleted_at");
 
     return {
       hasWorkspaceId,
       contentType,
       hasDocumentMembers: Boolean(tables?.document_members),
-      hasStarredDocuments: Boolean(tables?.starred_documents)
+      hasStarredDocuments: Boolean(tables?.starred_documents),
+      hasDeletedAt
     };
   })();
 
