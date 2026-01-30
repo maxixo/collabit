@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { useAppStore } from "../app/store";
+import { useAppStore, actions } from "../app/store";
 import { useAuth } from "../auth/AuthContext";
+import { ConfirmationModal } from "../components/ConfirmationModal";
 import { useStarToggle } from "../hooks/useStarToggle";
-import { fetchStarredDocuments, type DocumentSummary } from "../services/document.service";
+import {
+  fetchStarredDocuments,
+  moveDocumentToTrash,
+  type DocumentSummary
+} from "../services/document.service";
 import { subscribeToStarUpdates } from "../utils/starEvents";
 
 export const Starred = () => {
-  const { recentDocuments } = useAppStore();
+  const { recentDocuments, dispatch } = useAppStore();
   const { user, status } = useAuth();
   const location = useLocation();
   const { toggleStar } = useStarToggle();
@@ -15,6 +20,7 @@ export const Starred = () => {
   const workspaceId = searchParams.get("workspaceId") ?? "default";
   const [isSyncing, setIsSyncing] = useState(false);
   const [starredDocuments, setStarredDocuments] = useState<DocumentSummary[]>([]);
+  const [pendingTrashDocument, setPendingTrashDocument] = useState<DocumentSummary | null>(null);
   const showSkeleton = isSyncing && starredDocuments.length === 0;
   const recentDocumentsRef = useRef(recentDocuments);
 
@@ -34,6 +40,7 @@ export const Starred = () => {
   }, [userLabel]);
   const isRecentRoute = location.pathname === "/editor/recent";
   const isStarredRoute = location.pathname === "/editor/starred";
+  const isTrashRoute = location.pathname === "/editor/trash";
 
   const navLinkClass = (isActive: boolean) =>
     isActive
@@ -79,6 +86,27 @@ export const Starred = () => {
     },
     [toggleStar, updateStarredList]
   );
+
+  const handleConfirmMoveToTrash = useCallback(async () => {
+    if (!pendingTrashDocument) {
+      return;
+    }
+    const previousStarred = starredDocuments;
+    const previousRecent = recentDocuments;
+    setStarredDocuments(previousStarred.filter((doc) => doc.id !== pendingTrashDocument.id));
+    dispatch(
+      actions.setRecentDocuments(
+        previousRecent.filter((doc) => doc.id !== pendingTrashDocument.id)
+      )
+    );
+    setPendingTrashDocument(null);
+    try {
+      await moveDocumentToTrash(pendingTrashDocument.id, workspaceId);
+    } catch {
+      setStarredDocuments(previousStarred);
+      dispatch(actions.setRecentDocuments(previousRecent));
+    }
+  }, [dispatch, pendingTrashDocument, recentDocuments, starredDocuments, workspaceId]);
 
   useEffect(() => {
     let isActive = true;
@@ -171,10 +199,14 @@ export const Starred = () => {
                 <span className="material-symbols-outlined">group</span>
                 <p className="text-sm font-medium">Shared</p>
               </div>
-              <div className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] transition-colors hover:bg-[#f0f0f7] dark:text-[#a1a1c9] dark:hover:bg-white/5">
+              <Link
+                className={navLinkClass(isTrashRoute)}
+                to="/editor/trash"
+                aria-current={isTrashRoute ? "page" : undefined}
+              >
                 <span className="material-symbols-outlined">delete</span>
                 <p className="text-sm font-medium">Trash</p>
-              </div>
+              </Link>
             </nav>
           </div>
 
@@ -293,30 +325,44 @@ export const Starred = () => {
                       to={`/editor/${encodeURIComponent(doc.id)}?workspaceId=${encodeURIComponent(workspace)}`}
                       aria-label={`Open ${title}`}
                     >
-                      <button
-                        className={`absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-[#e7e7f3] bg-white/90 text-[#4c4d9a] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9] ${
-                          doc.isStarred ? "text-amber-400 dark:text-amber-300" : ""
-                        }`}
-                        type="button"
-                        aria-pressed={doc.isStarred}
-                        aria-label={doc.isStarred ? "Unstar document" : "Star document"}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          void handleToggleStar(doc);
-                        }}
-                      >
-                        <span
-                          className="material-symbols-outlined text-lg"
-                          style={{
-                            fontVariationSettings: doc.isStarred
-                              ? "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24"
-                              : "'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24"
+                      <div className="absolute right-3 top-3 flex items-center gap-2">
+                        <button
+                          className={`flex h-8 w-8 items-center justify-center rounded-full border border-[#e7e7f3] bg-white/90 text-[#4c4d9a] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9] ${
+                            doc.isStarred ? "text-amber-400 dark:text-amber-300" : ""
+                          }`}
+                          type="button"
+                          aria-pressed={doc.isStarred}
+                          aria-label={doc.isStarred ? "Unstar document" : "Star document"}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void handleToggleStar(doc);
                           }}
                         >
-                          star
-                        </span>
-                      </button>
+                          <span
+                            className="material-symbols-outlined text-lg"
+                            style={{
+                              fontVariationSettings: doc.isStarred
+                                ? "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24"
+                                : "'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24"
+                            }}
+                          >
+                            star
+                          </span>
+                        </button>
+                        <button
+                          className="flex h-8 w-8 items-center justify-center rounded-full border border-[#e7e7f3] bg-white/90 text-rose-500 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-rose-300"
+                          type="button"
+                          aria-label="Move to trash"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setPendingTrashDocument(doc);
+                          }}
+                        >
+                          <span className="material-symbols-outlined text-lg">delete</span>
+                        </button>
+                      </div>
                       <div className="flex aspect-[4/3] w-full items-center justify-center rounded-lg bg-[#e7e7f3] text-[#4c4d9a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9]">
                         <span className="material-symbols-outlined text-3xl">description</span>
                       </div>
@@ -338,6 +384,22 @@ export const Starred = () => {
           </div>
         </main>
       </div>
+
+      <ConfirmationModal
+        isOpen={Boolean(pendingTrashDocument)}
+        title="Move to trash?"
+        description={
+          pendingTrashDocument
+            ? `You can restore "${pendingTrashDocument.title || "Untitled document"}" from the trash later.`
+            : ""
+        }
+        confirmLabel="Move to trash"
+        cancelLabel="Cancel"
+        tone="danger"
+        icon="delete"
+        onClose={() => setPendingTrashDocument(null)}
+        onConfirm={() => void handleConfirmMoveToTrash()}
+      />
     </div>
   );
 };

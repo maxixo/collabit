@@ -1,25 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { useAppStore, actions } from "../app/store";
+import { useAppStore } from "../app/store";
 import { useAuth } from "../auth/AuthContext";
 import { ConfirmationModal } from "../components/ConfirmationModal";
-import { useStarToggle } from "../hooks/useStarToggle";
 import {
-  fetchDocuments,
-  moveDocumentToTrash,
+  emptyTrash,
+  fetchTrashDocuments,
+  permanentlyDeleteDocument,
+  restoreDocument,
   type DocumentSummary
 } from "../services/document.service";
 
-export const Recent = () => {
-  const { recentDocuments, activeDocumentId, dispatch } = useAppStore();
+export const Trash = () => {
+  const { activeDocumentId, recentDocuments } = useAppStore();
   const { user, status } = useAuth();
   const location = useLocation();
-  const { toggleStar } = useStarToggle();
   const [searchParams] = useSearchParams();
   const workspaceId = searchParams.get("workspaceId") ?? "default";
   const [isSyncing, setIsSyncing] = useState(false);
-  const [pendingTrashDocument, setPendingTrashDocument] = useState<DocumentSummary | null>(null);
-  const showSkeleton = isSyncing && recentDocuments.length === 0;
+  const [trashedDocuments, setTrashedDocuments] = useState<DocumentSummary[]>([]);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DocumentSummary | null>(null);
+  const [isEmptyTrashOpen, setIsEmptyTrashOpen] = useState(false);
+  const showSkeleton = isSyncing && trashedDocuments.length === 0;
   const userLabel = useMemo(() => {
     if (status !== "authenticated") {
       return "User";
@@ -55,50 +58,63 @@ export const Recent = () => {
       ? "flex items-center gap-3 rounded-lg bg-[#e7e7f3] px-3 py-2 text-primary dark:bg-primary/20"
       : "flex items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] transition-colors hover:bg-[#f0f0f7] dark:text-[#a1a1c9] dark:hover:bg-white/5";
 
-  const handleToggleStar = useCallback(
-    async (documentId: string) => {
-      const doc = recentDocuments.find((item) => item.id === documentId);
-      if (!doc) {
-        return;
-      }
+  const notifyError = useCallback((message: string) => {
+    setActionError(message);
+    window.setTimeout(() => setActionError(null), 3200);
+  }, []);
+
+  const handleRestoreDocument = useCallback(
+    async (doc: DocumentSummary) => {
+      const previous = trashedDocuments;
+      setTrashedDocuments((current) => current.filter((item) => item.id !== doc.id));
       try {
-        await toggleStar(doc);
+        await restoreDocument(doc.id, workspaceId);
       } catch {
-        // Ignore toggle errors; optimistic update is reverted in the hook.
+        setTrashedDocuments(previous);
+        notifyError("Restore failed. Please try again.");
       }
     },
-    [recentDocuments, toggleStar]
+    [notifyError, trashedDocuments, workspaceId]
   );
 
-  const handleConfirmMoveToTrash = useCallback(async () => {
-    if (!pendingTrashDocument) {
-      return;
-    }
-    const previousDocuments = recentDocuments;
-    dispatch(
-      actions.setRecentDocuments(
-        previousDocuments.filter((doc) => doc.id !== pendingTrashDocument.id)
-      )
-    );
-    setPendingTrashDocument(null);
+  const handlePermanentDelete = useCallback(
+    async (doc: DocumentSummary) => {
+      const previous = trashedDocuments;
+      setTrashedDocuments((current) => current.filter((item) => item.id !== doc.id));
+      setPendingDelete(null);
+      try {
+        await permanentlyDeleteDocument(doc.id, workspaceId);
+      } catch {
+        setTrashedDocuments(previous);
+        notifyError("Delete failed. Please try again.");
+      }
+    },
+    [notifyError, trashedDocuments, workspaceId]
+  );
+
+  const handleEmptyTrash = useCallback(async () => {
+    const previous = trashedDocuments;
+    setTrashedDocuments([]);
+    setIsEmptyTrashOpen(false);
     try {
-      await moveDocumentToTrash(pendingTrashDocument.id, workspaceId);
+      await emptyTrash(workspaceId);
     } catch {
-      dispatch(actions.setRecentDocuments(previousDocuments));
+      setTrashedDocuments(previous);
+      notifyError("Empty trash failed. Please try again.");
     }
-  }, [dispatch, pendingTrashDocument, recentDocuments, workspaceId]);
+  }, [notifyError, trashedDocuments, workspaceId]);
 
   useEffect(() => {
     let isActive = true;
 
-    const loadRecentDocuments = async () => {
+    const loadTrashDocuments = async () => {
       setIsSyncing(true);
       try {
-        const docs = await fetchDocuments(workspaceId);
+        const docs = await fetchTrashDocuments(workspaceId);
         if (!isActive) {
           return;
         }
-        dispatch(actions.setRecentDocuments(docs));
+        setTrashedDocuments(docs);
       } catch {
         if (!isActive) {
           return;
@@ -110,12 +126,12 @@ export const Recent = () => {
       }
     };
 
-    void loadRecentDocuments();
+    void loadTrashDocuments();
 
     return () => {
       isActive = false;
     };
-  }, [workspaceId, dispatch]);
+  }, [workspaceId]);
 
   return (
     <div className="bg-background-light text-[#0d0e1b] dark:bg-background-dark dark:text-[#f8f8fc] font-['Inter',_sans-serif]">
@@ -204,7 +220,7 @@ export const Recent = () => {
                 <div className="flex flex-col">
                   <p className="text-sm font-bold leading-none text-[#0d0e1b] dark:text-white">Syncing...</p>
                   <p className="mt-1 text-xs text-[#4c4d9a] dark:text-[#a1a1c9]">
-                    Updating your latest changes
+                    Loading trash items
                   </p>
                 </div>
                 <button className="ml-auto text-[#cfd0e7] transition-colors hover:text-primary" type="button">
@@ -253,20 +269,38 @@ export const Recent = () => {
           <div className="p-8">
             <div className="mb-8 flex items-end justify-between">
               <div>
-                <h2 className="mb-2 text-3xl font-black tracking-tight">Recent Documents</h2>
-                <p className="text-[#4c4d9a] dark:text-[#a1a1c9]">Manage and edit your workspace files</p>
+                <h2 className="mb-2 text-3xl font-black tracking-tight">Trash</h2>
+                <p className="text-[#4c4d9a] dark:text-[#a1a1c9]">
+                  Restore items or permanently remove them.
+                </p>
               </div>
               <div className="flex gap-2">
-                <div className="skeleton-shimmer h-9 w-24 rounded-lg bg-[#e7e7f3] dark:bg-[#1e1f3a]"></div>
-                <div className="skeleton-shimmer h-9 w-24 rounded-lg bg-[#e7e7f3] dark:bg-[#1e1f3a]"></div>
+                {trashedDocuments.length > 0 ? (
+                  <button
+                    className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-500/10 dark:text-rose-200"
+                    onClick={() => setIsEmptyTrashOpen(true)}
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-base">delete_sweep</span>
+                    <span>Empty Trash</span>
+                  </button>
+                ) : showSkeleton ? (
+                  <div className="skeleton-shimmer h-9 w-28 rounded-lg bg-[#e7e7f3] dark:bg-[#1e1f3a]"></div>
+                ) : null}
               </div>
             </div>
+
+            {actionError ? (
+              <div className="mb-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-500/10 dark:text-rose-200">
+                {actionError}
+              </div>
+            ) : null}
 
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {showSkeleton ? (
                 Array.from({ length: 8 }).map((_, index) => (
                   <div
-                    key={`recent-skeleton-${index}`}
+                    key={`trash-skeleton-${index}`}
                     className="group flex flex-col gap-4 rounded-xl border border-[#e7e7f3] bg-white p-4 dark:border-[#2a2b4a] dark:bg-[#16172d]"
                   >
                     <div className="skeleton-shimmer aspect-[4/3] w-full rounded-lg bg-[#e7e7f3] dark:bg-[#1e1f3a]"></div>
@@ -276,57 +310,34 @@ export const Recent = () => {
                     </div>
                   </div>
                 ))
-              ) : recentDocuments.length > 0 ? (
-                recentDocuments.map((doc) => {
+              ) : trashedDocuments.length > 0 ? (
+                trashedDocuments.map((doc) => {
                   const title = doc.title?.trim() ? doc.title : "Untitled document";
                   const updatedAtLabel = doc.updatedAt
                     ? new Date(doc.updatedAt).toLocaleDateString()
                     : "Recently";
-                  const workspace = doc.workspaceId || workspaceId;
 
                   return (
-                    <Link
+                    <div
                       key={doc.id}
                       className="group relative flex flex-col gap-4 rounded-xl border border-[#e7e7f3] bg-white p-4 transition-shadow hover:shadow-lg dark:border-[#2a2b4a] dark:bg-[#16172d]"
-                      to={`/editor/${encodeURIComponent(doc.id)}?workspaceId=${encodeURIComponent(workspace)}`}
-                      aria-label={`Open ${title}`}
                     >
                       <div className="absolute right-3 top-3 flex items-center gap-2">
                         <button
-                          className={`flex h-8 w-8 items-center justify-center rounded-full border border-[#e7e7f3] bg-white/90 text-[#4c4d9a] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9] ${
-                            doc.isStarred ? "text-amber-400 dark:text-amber-300" : ""
-                          }`}
+                          className="flex h-8 w-8 items-center justify-center rounded-full border border-[#e7e7f3] bg-white/90 text-emerald-500 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-emerald-300"
                           type="button"
-                          aria-pressed={doc.isStarred}
-                          aria-label={doc.isStarred ? "Unstar document" : "Star document"}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            void handleToggleStar(doc.id);
-                          }}
+                          aria-label="Restore document"
+                          onClick={() => void handleRestoreDocument(doc)}
                         >
-                          <span
-                            className="material-symbols-outlined text-lg"
-                            style={{
-                              fontVariationSettings: doc.isStarred
-                                ? "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24"
-                                : "'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24"
-                            }}
-                          >
-                            star
-                          </span>
+                          <span className="material-symbols-outlined text-lg">restore_from_trash</span>
                         </button>
                         <button
                           className="flex h-8 w-8 items-center justify-center rounded-full border border-[#e7e7f3] bg-white/90 text-rose-500 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-rose-300"
                           type="button"
-                          aria-label="Move to trash"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            setPendingTrashDocument(doc);
-                          }}
+                          aria-label="Delete permanently"
+                          onClick={() => setPendingDelete(doc)}
                         >
-                          <span className="material-symbols-outlined text-lg">delete</span>
+                          <span className="material-symbols-outlined text-lg">delete_forever</span>
                         </button>
                       </div>
                       <div className="flex aspect-[4/3] w-full items-center justify-center rounded-lg bg-[#e7e7f3] text-[#4c4d9a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9]">
@@ -338,12 +349,12 @@ export const Recent = () => {
                           Updated {updatedAtLabel}
                         </p>
                       </div>
-                    </Link>
+                    </div>
                   );
                 })
               ) : (
                 <div className="col-span-full rounded-xl border border-dashed border-[#e7e7f3] p-6 text-center text-sm text-[#4c4d9a] dark:border-[#2a2b4a] dark:text-[#a1a1c9]">
-                  No recent documents yet.
+                  Trash is empty.
                 </div>
               )}
             </div>
@@ -352,19 +363,27 @@ export const Recent = () => {
       </div>
 
       <ConfirmationModal
-        isOpen={Boolean(pendingTrashDocument)}
-        title="Move to trash?"
-        description={
-          pendingTrashDocument
-            ? `You can restore "${pendingTrashDocument.title || "Untitled document"}" from the trash later.`
-            : ""
-        }
-        confirmLabel="Move to trash"
-        cancelLabel="Cancel"
+        isOpen={Boolean(pendingDelete)}
+        title="Delete permanently?"
+        description={pendingDelete ? `This cannot be undone for "${pendingDelete.title || "Untitled document"}".` : ""}
+        warning="This action permanently deletes the document and cannot be undone."
+        confirmLabel="Delete permanently"
         tone="danger"
-        icon="delete"
-        onClose={() => setPendingTrashDocument(null)}
-        onConfirm={() => void handleConfirmMoveToTrash()}
+        icon="delete_forever"
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => (pendingDelete ? void handlePermanentDelete(pendingDelete) : undefined)}
+      />
+
+      <ConfirmationModal
+        isOpen={isEmptyTrashOpen}
+        title="Empty trash?"
+        description="This removes every document in the trash for this workspace."
+        warning="This action permanently deletes all trashed documents."
+        confirmLabel="Empty trash"
+        tone="danger"
+        icon="delete_sweep"
+        onClose={() => setIsEmptyTrashOpen(false)}
+        onConfirm={() => void handleEmptyTrash()}
       />
     </div>
   );

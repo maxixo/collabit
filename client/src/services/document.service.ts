@@ -77,6 +77,80 @@ export const fetchStarredDocuments = async (workspaceId: string): Promise<Docume
   }
 };
 
+export const fetchTrashDocuments = async (workspaceId: string): Promise<DocumentSummary[]> => {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/trash?workspaceId=${encodeURIComponent(workspaceId)}`,
+    { credentials: "include" }
+  );
+  const data = await parseJson<{ documents: DocumentSummary[] }>(response);
+  return data.documents ?? [];
+};
+
+export const moveDocumentToTrash = async (
+  documentId: string,
+  workspaceId: string
+): Promise<{ documentId: string; trashed: boolean }> => {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/trash?workspaceId=${encodeURIComponent(
+      workspaceId
+    )}`,
+    {
+      method: "PATCH",
+      credentials: "include"
+    }
+  );
+
+  return await parseJson<{ documentId: string; trashed: boolean }>(response);
+};
+
+export const restoreDocument = async (
+  documentId: string,
+  workspaceId: string
+): Promise<{ documentId: string; restored: boolean }> => {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/restore?workspaceId=${encodeURIComponent(
+      workspaceId
+    )}`,
+    {
+      method: "PATCH",
+      credentials: "include"
+    }
+  );
+
+  return await parseJson<{ documentId: string; restored: boolean }>(response);
+};
+
+export const permanentlyDeleteDocument = async (
+  documentId: string,
+  workspaceId: string
+): Promise<{ documentId: string; deleted: boolean }> => {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}?workspaceId=${encodeURIComponent(
+      workspaceId
+    )}`,
+    {
+      method: "DELETE",
+      credentials: "include"
+    }
+  );
+
+  return await parseJson<{ documentId: string; deleted: boolean }>(response);
+};
+
+export const emptyTrash = async (
+  workspaceId: string
+): Promise<{ deletedCount: number }> => {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/trash?workspaceId=${encodeURIComponent(workspaceId)}`,
+    {
+      method: "DELETE",
+      credentials: "include"
+    }
+  );
+
+  return await parseJson<{ deletedCount: number }>(response);
+};
+
 export const fetchDocumentById = async (
   id: string,
   workspaceId: string,

@@ -5,6 +5,7 @@ import { SignUp } from "../pages/SignUp";
 import { Editor } from "../pages/Editor";
 import { Recent } from "../pages/Recent";
 import { Starred } from "../pages/Starred";
+import { Trash } from "../pages/Trash";
 
 export const router = createBrowserRouter([
   {
@@ -36,6 +37,14 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <Starred />
+      </ProtectedRoute>
+    )
+  },
+  {
+    path: "/editor/trash",
+    element: (
+      <ProtectedRoute>
+        <Trash />
       </ProtectedRoute>
     )
   },
