@@ -9,6 +9,7 @@ export interface AuthenticatedRequest extends Request {
     name?: string;
     image?: string;
   };
+  shareToken?: string;
 }
 
 type SessionPayload = {
@@ -71,8 +72,24 @@ export const authMiddleware = async (
   next: NextFunction
 ) => {
   try {
+    const shareToken = getShareTokenFromRequest(req);
+    if (shareToken) {
+      req.shareToken = shareToken;
+    }
+
     const user = await getSessionUser(req);
     if (!user) {
+      if (shareToken) {
+        next();
+        return;
+      }
+
+      const redirectUrl = buildSignInRedirectUrl(req);
+      if (shouldRedirectToSignIn(req)) {
+        res.redirect(302, redirectUrl);
+        return;
+      }
+
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
@@ -82,4 +99,37 @@ export const authMiddleware = async (
   } catch (error) {
     next(error);
   }
+};
+
+const getShareTokenFromRequest = (req: Request): string | undefined => {
+  const query = req.query as Record<string, unknown> | undefined;
+  const queryToken =
+    typeof query?.shareToken === "string"
+      ? query.shareToken
+      : typeof query?.token === "string"
+        ? query.token
+        : undefined;
+  const headerToken =
+    req.header("x-share-token") ?? req.header("share-token") ?? req.header("x-share-link-token");
+
+  const token = queryToken ?? headerToken ?? "";
+  const normalized = token.trim();
+  return normalized ? normalized : undefined;
+};
+
+const shouldRedirectToSignIn = (req: Request): boolean => {
+  if (req.method !== "GET") {
+    return false;
+  }
+
+  const accept = req.header("accept") ?? "";
+  return accept.includes("text/html");
+};
+
+const buildSignInRedirectUrl = (req: Request): string => {
+  const baseUrl = env.authBaseUrl || `${req.protocol}://${req.get("host")}`;
+  const signInUrl = new URL("/auth/sign-in", baseUrl);
+  const redirectTarget = req.originalUrl || "/";
+  signInUrl.searchParams.set("redirect", redirectTarget);
+  return signInUrl.toString();
 };

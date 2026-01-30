@@ -1,7 +1,11 @@
+import type { ShareToken } from "@shared/types.js";
 import { db } from "../config/db.js";
 import type { DocumentModel, DocumentSummary, TipTapContent } from "../models/document.model.js";
 import { mapDocumentRow, mapDocumentSummaryRow } from "../models/document.model.js";
 import { getDocumentSchemaInfo, type DocumentSchemaInfo } from "./documentSchema.service.js";
+import type { DocumentRole } from "./permission.service.js";
+import { validateShareToken } from "./shareToken.service.js";
+import { joinWorkspaceViaShare } from "./workspace.service.js";
 
 const createParamBuilder = () => {
   const params: Array<unknown> = [];
@@ -18,6 +22,235 @@ const buildVisibilityClause = (schema: DocumentSchemaInfo, userParam: string) =>
     return `d.owner_id = ${userParam}`;
   }
   return `(d.owner_id = ${userParam} OR EXISTS (SELECT 1 FROM document_members m WHERE m.document_id = d.id AND m.user_id = ${userParam}))`;
+};
+
+const normalizeSharePermission = (permissionLevel: string): DocumentRole => {
+  if (permissionLevel === "viewer") {
+    return "viewer";
+  }
+  return "editor";
+};
+
+const normalizeMemberRole = (role: unknown): DocumentRole | null => {
+  if (role === "viewer" || role === "editor" || role === "owner") {
+    return role;
+  }
+  return null;
+};
+
+const fetchDocumentAccessInfo = async (documentId: string, schema: DocumentSchemaInfo) => {
+  const { params, addParam } = createParamBuilder();
+  const idParam = addParam(documentId);
+  const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : "NULL AS workspace_id";
+  const deletedClause = schema.hasDeletedAt ? "AND d.deleted_at IS NULL" : "";
+
+  const { rows } = await db.query(
+    `
+      SELECT d.owner_id, ${workspaceSelect}
+      FROM documents d
+      WHERE d.id = ${idParam}
+      ${deletedClause}
+      LIMIT 1
+    `,
+    params
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const row = rows[0] as { owner_id?: string; workspace_id?: string; workspaceId?: string };
+  const workspaceId = schema.hasWorkspaceId
+    ? typeof row.workspace_id === "string"
+      ? row.workspace_id
+      : typeof row.workspaceId === "string"
+        ? row.workspaceId
+        : ""
+    : "";
+
+  return {
+    ownerId: typeof row.owner_id === "string" ? row.owner_id : "",
+    workspaceId
+  };
+};
+
+const fetchDocumentMemberRole = async (
+  documentId: string,
+  userId: string,
+  schema: DocumentSchemaInfo
+): Promise<DocumentRole | null> => {
+  if (!schema.hasDocumentMembers || !userId) {
+    return null;
+  }
+
+  const { rows } = await db.query(
+    `
+      SELECT role
+      FROM document_members
+      WHERE document_id = $1
+        AND user_id = $2
+      LIMIT 1
+    `,
+    [documentId, userId]
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const row = rows[0] as { role?: unknown };
+  return normalizeMemberRole(row.role);
+};
+
+export type DocumentShareAccessResult =
+  | {
+      allowed: true;
+      role: DocumentRole;
+      source: "member" | "share";
+      workspaceId: string;
+      shareToken?: ShareToken;
+    }
+  | {
+      allowed: false;
+      reason: "not_found" | "unauthorized" | "share_invalid";
+      workspaceId?: string;
+      shareReason?: "not_found" | "expired" | "max_uses";
+    };
+
+export const validateDocumentAccessWithShare = async (
+  documentId: string,
+  userId: string,
+  shareToken?: string
+): Promise<DocumentShareAccessResult> => {
+  if (!documentId) {
+    return { allowed: false, reason: "not_found" };
+  }
+
+  const schema = await getDocumentSchemaInfo();
+  const accessInfo = await fetchDocumentAccessInfo(documentId, schema);
+  if (!accessInfo) {
+    return { allowed: false, reason: "not_found" };
+  }
+
+  if (userId && accessInfo.ownerId === userId) {
+    return {
+      allowed: true,
+      role: "owner",
+      source: "member",
+      workspaceId: accessInfo.workspaceId
+    };
+  }
+
+  const memberRole = await fetchDocumentMemberRole(documentId, userId, schema);
+  if (memberRole) {
+    return {
+      allowed: true,
+      role: memberRole,
+      source: "member",
+      workspaceId: accessInfo.workspaceId
+    };
+  }
+
+  if (!shareToken) {
+    return {
+      allowed: false,
+      reason: "unauthorized",
+      workspaceId: accessInfo.workspaceId
+    };
+  }
+
+  const validation = await validateShareToken(shareToken);
+  if (!validation.valid || validation.token.documentId !== documentId) {
+    return {
+      allowed: false,
+      reason: "share_invalid",
+      workspaceId: accessInfo.workspaceId,
+      shareReason: validation.valid ? "not_found" : validation.reason
+    };
+  }
+
+  return {
+    allowed: true,
+    role: normalizeSharePermission(validation.token.permissionLevel),
+    source: "share",
+    workspaceId: accessInfo.workspaceId,
+    shareToken: validation.token
+  };
+};
+
+export const autoJoinDocumentViaShare = async (
+  documentId: string,
+  userId: string,
+  shareToken: string,
+  permissionLevel: string
+): Promise<boolean> => {
+  if (!documentId || !userId || !shareToken) {
+    return false;
+  }
+
+  const schema = await getDocumentSchemaInfo();
+  if (!schema.hasDocumentMembers) {
+    return false;
+  }
+
+  const validation = await validateShareToken(shareToken);
+  if (!validation.valid || validation.token.documentId !== documentId) {
+    return false;
+  }
+
+  const { params, addParam } = createParamBuilder();
+  const idParam = addParam(documentId);
+  const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : "NULL AS workspace_id";
+
+  const { rows } = await db.query(
+    `
+      SELECT d.owner_id, ${workspaceSelect}
+      FROM documents d
+      WHERE d.id = ${idParam}
+      LIMIT 1
+    `,
+    params
+  );
+
+  if (rows.length === 0) {
+    return false;
+  }
+
+  const row = rows[0] as { owner_id?: string; workspace_id?: string; workspaceId?: string };
+  const ownerId = typeof row.owner_id === "string" ? row.owner_id : "";
+  const workspaceId = schema.hasWorkspaceId
+    ? typeof row.workspace_id === "string"
+      ? row.workspace_id
+      : typeof row.workspaceId === "string"
+        ? row.workspaceId
+        : ""
+    : "";
+
+  if (ownerId && ownerId === userId) {
+    return true;
+  }
+
+  const resolvedPermission =
+    permissionLevel === "viewer" || permissionLevel === "editor" || permissionLevel === "owner"
+      ? permissionLevel
+      : validation.token.permissionLevel;
+
+  const role = normalizeSharePermission(resolvedPermission);
+
+  await db.query(
+    `
+      INSERT INTO document_members (document_id, user_id, role)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (document_id, user_id) DO NOTHING
+    `,
+    [documentId, userId, role]
+  );
+
+  if (workspaceId) {
+    await joinWorkspaceViaShare(workspaceId, userId);
+  }
+
+  return true;
 };
 
 export const listDocuments = async (
@@ -65,20 +298,24 @@ export const listDocuments = async (
 export const getDocumentById = async (
   id: string,
   workspaceId: string,
-  userId: string
+  userId: string,
+  options?: { bypassAccessCheck?: boolean }
 ): Promise<DocumentModel | null> => {
   const schema = await getDocumentSchemaInfo();
   const { params, addParam } = createParamBuilder();
   const idParam = addParam(id);
   const userParam = addParam(userId);
   const workspaceParam = addParam(workspaceId);
+  const bypassAccessCheck = Boolean(options?.bypassAccessCheck);
 
   const joinClause = schema.hasDocumentMembers
     ? `LEFT JOIN document_members m ON d.id = m.document_id AND m.user_id = ${userParam}`
     : "";
-  const visibilityClause = schema.hasDocumentMembers
-    ? `(d.owner_id = ${userParam} OR m.user_id = ${userParam})`
-    : `d.owner_id = ${userParam}`;
+  const visibilityClause = bypassAccessCheck
+    ? "TRUE"
+    : schema.hasDocumentMembers
+      ? `(d.owner_id = ${userParam} OR m.user_id = ${userParam})`
+      : `d.owner_id = ${userParam}`;
   const starJoin = schema.hasStarredDocuments
     ? `LEFT JOIN starred_documents s ON d.id = s.document_id AND s.user_id = ${userParam}`
     : "";

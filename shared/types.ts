@@ -20,6 +20,26 @@ export interface DocumentDetail extends DocumentSummary {
 
 export type SharedDocument = DocumentSummary;
 
+export type ShareTokenPermission = "viewer" | "editor" | "owner";
+
+export interface ShareToken {
+  id: string;
+  token: string;
+  documentId: string;
+  createdBy: string;
+  permissionLevel: ShareTokenPermission;
+  expirationDate: string | null;
+  maxUses: number | null;
+  useCount: number;
+  createdAt: string;
+}
+
+export interface ShareTokenOptions {
+  permission?: ShareTokenPermission;
+  expiration?: string | null;
+  maxUses?: number | null;
+}
+
 export interface PresenceState {
   userId: string;
   cursor: { x: number; y: number } | null;
