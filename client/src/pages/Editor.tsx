@@ -774,6 +774,7 @@ export const Editor = () => {
       {showShareModal && documentId && (
         <ShareModal
           documentId={documentId}
+          workspaceId={workspaceId}
           onClose={() => setShowShareModal(false)}
         />
       )}
