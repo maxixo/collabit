@@ -187,3 +187,18 @@ authRoutes.get("/callback/:provider", async (req, res, next) => {
     next(error);
   }
 });
+
+authRoutes.get("/error", async (req, res, _next) => {
+  const { error: errorCode, error_description: errorDescription } = req.query as {
+    error?: string;
+    error_description?: string;
+  };
+
+  const errorMessage = errorDescription || "An authentication error occurred";
+  const statusCode = errorCode === "access_denied" ? 403 : 400;
+
+  res.status(statusCode).json({
+    error: errorCode || "AUTH_ERROR",
+    message: errorMessage
+  });
+});

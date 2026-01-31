@@ -21,11 +21,58 @@ type AuthContextValue = {
   status: AuthStatus;
   user: AuthUser | null;
   refresh: () => Promise<void>;
+  getRedirectPath: (fallback?: string) => string;
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+export const SHARE_REDIRECT_STORAGE_KEY = "share_redirect_path";
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+type ShareRedirectPayload = {
+  path?: unknown;
+};
+
+const readShareRedirectPath = (): string | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  let raw: string | null = null;
+  try {
+    raw = sessionStorage.getItem(SHARE_REDIRECT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+
+  if (!raw) {
+    return null;
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(trimmed) as ShareRedirectPayload;
+    const path = typeof payload?.path === "string" ? payload.path.trim() : "";
+    return path.startsWith("/") ? path : null;
+  } catch {
+    return trimmed.startsWith("/") ? trimmed : null;
+  }
+};
+
+const clearShareRedirectPath = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    sessionStorage.removeItem(SHARE_REDIRECT_STORAGE_KEY);
+  } catch {
+    // Ignore storage access errors.
+  }
+};
 
 const getJwtHeaders = (): Record<string, string> => {
   const headers: Record<string, string> = {};
@@ -137,13 +184,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void refresh();
   }, [refresh]);
 
+  const getRedirectPath = useCallback((fallback = "/editor/recent") => {
+    const stored = readShareRedirectPath();
+    if (stored) {
+      clearShareRedirectPath();
+      return stored;
+    }
+    return fallback;
+  }, []);
+
   const value = useMemo(
     () => ({
       status,
       user,
-      refresh
+      refresh,
+      getRedirectPath
     }),
-    [status, user, refresh]
+    [status, user, refresh, getRedirectPath]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

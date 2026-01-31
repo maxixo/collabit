@@ -40,6 +40,18 @@ const safeStore = async (task: () => Promise<void>) => {
   }
 };
 
+const buildDocumentUrl = (id: string, workspaceId?: string, shareToken?: string) => {
+  const params = new URLSearchParams();
+  if (workspaceId) {
+    params.set("workspaceId", workspaceId);
+  }
+  if (shareToken) {
+    params.set("token", shareToken);
+  }
+  const query = params.toString();
+  return `${API_BASE_URL}/api/documents/${encodeURIComponent(id)}${query ? `?${query}` : ""}`;
+};
+
 export const fetchDocuments = async (workspaceId: string): Promise<DocumentSummary[]> => {
   try {
     const response = await fetch(
@@ -153,14 +165,12 @@ export const emptyTrash = async (
 
 export const fetchDocumentById = async (
   id: string,
-  workspaceId: string,
-  options?: { signal?: AbortSignal }
+  workspaceId?: string,
+  options?: { signal?: AbortSignal; shareToken?: string }
 ): Promise<DocumentDetail | null> => {
   try {
     const response = await fetch(
-      `${API_BASE_URL}/api/documents/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(
-        workspaceId
-      )}`,
+      buildDocumentUrl(id, workspaceId, options?.shareToken),
       { credentials: "include", signal: options?.signal }
     );
 
@@ -223,11 +233,9 @@ export const updateDocument = async (payload: {
   workspaceId: string;
   title?: string;
   content?: TipTapContent;
-}, options?: { signal?: AbortSignal }): Promise<DocumentDetail> => {
+}, options?: { signal?: AbortSignal; shareToken?: string }): Promise<DocumentDetail> => {
   const response = await fetch(
-    `${API_BASE_URL}/api/documents/${encodeURIComponent(payload.id)}?workspaceId=${encodeURIComponent(
-      payload.workspaceId
-    )}`,
+    buildDocumentUrl(payload.id, payload.workspaceId, options?.shareToken),
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

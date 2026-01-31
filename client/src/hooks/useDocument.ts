@@ -11,7 +11,11 @@ const EMPTY_CONTENT = EMPTY_TIPTAP_DOC;
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
 
-export const useDocument = (documentId?: string, workspaceId?: string) => {
+export const useDocument = (
+  documentId?: string,
+  workspaceId?: string,
+  options?: { shareToken?: string }
+) => {
   const [document, setDocument] = useState<DocumentState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +25,7 @@ export const useDocument = (documentId?: string, workspaceId?: string) => {
   const pendingSaveRef = useRef(0);
   const currentDocumentIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const shareToken = options?.shareToken;
 
   const persistDocument = useCallback(
     async (next: DocumentState, saveId: number) => {
@@ -29,12 +34,15 @@ export const useDocument = (documentId?: string, workspaceId?: string) => {
       }
 
       try {
-        await updateDocument({
-          id: documentId,
-          workspaceId,
-          title: next.title,
-          content: next.content
-        }, { signal: abortControllerRef.current?.signal });
+        await updateDocument(
+          {
+            id: documentId,
+            workspaceId,
+            title: next.title,
+            content: next.content
+          },
+          { signal: abortControllerRef.current?.signal, shareToken }
+        );
         if (pendingSaveRef.current === saveId) {
           setSaveStatus("saved");
           setSaveError(null);
@@ -49,7 +57,7 @@ export const useDocument = (documentId?: string, workspaceId?: string) => {
         }
       }
     },
-    [documentId, workspaceId]
+    [documentId, workspaceId, shareToken]
   );
 
   const debouncedPersist = useMemo(() => {
@@ -87,7 +95,7 @@ export const useDocument = (documentId?: string, workspaceId?: string) => {
     cancelPendingSave();
 
     const loadDocument = async () => {
-      if (!documentId || !workspaceId) {
+      if (!documentId || (!workspaceId && !shareToken)) {
         if (isMounted) {
           setDocument(null);
           setLoading(false);
@@ -101,7 +109,8 @@ export const useDocument = (documentId?: string, workspaceId?: string) => {
 
       try {
         const result = await fetchDocumentById(documentId, workspaceId, {
-          signal: nextController.signal
+          signal: nextController.signal,
+          shareToken
         });
         if (!isMounted) {
           return;
@@ -158,7 +167,7 @@ export const useDocument = (documentId?: string, workspaceId?: string) => {
       }
       cancelPendingSave();
     };
-  }, [documentId, workspaceId, cancelPendingSave]);
+  }, [documentId, workspaceId, shareToken, cancelPendingSave]);
 
   const updateDocumentState = useCallback(
     (next: DocumentState) => {

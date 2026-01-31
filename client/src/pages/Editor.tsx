@@ -10,6 +10,7 @@ import { useStarToggle } from "../hooks/useStarToggle";
 import { useAuth } from "../auth/AuthContext";
 import { useAppStore, actions, type Collaborator } from "../app/store";
 import { createDocument, fetchDocuments } from "../services/document.service";
+import { validateShareToken } from "../services/share.service";
 import { searchDocumentsWithFallback } from "../services/search.service";
 import { indexDocument, type SearchResult } from "../offline/searchIndex";
 import { debounce } from "../utils/debounce";
@@ -21,7 +22,7 @@ import { subscribeToStarUpdates } from "../utils/starEvents";
 import { ConflictModal } from "../components/ConflictModal";
 import { ShareModal } from "../components/ShareModal";
 
-const isCollaborationParam = (value: string | null) => {
+const isTruthyParam = (value: string | null) => {
   if (value === null) {
     return false;
   }
@@ -32,20 +33,38 @@ const isCollaborationParam = (value: string | null) => {
   return normalized === "1" || normalized === "true" || normalized === "yes";
 };
 
+const normalizeToken = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
 export const Editor = () => {
   const emptyContent: JSONContent = EMPTY_TIPTAP_DOC;
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const workspaceId = searchParams.get("workspaceId") ?? "default";
+  const shareToken = normalizeToken(searchParams.get("token") ?? searchParams.get("shareToken"));
+  const shareRequested =
+    isTruthyParam(searchParams.get("share")) || isTruthyParam(searchParams.get("shared"));
+  const collabRequested =
+    isTruthyParam(searchParams.get("collab")) || isTruthyParam(searchParams.get("collaboration"));
+  const queryWorkspaceId = searchParams.get("workspaceId")?.trim() ?? "";
+  const [resolvedWorkspaceId, setResolvedWorkspaceId] = useState(() => {
+    if (shareToken && !queryWorkspaceId) {
+      return "";
+    }
+    return queryWorkspaceId || "default";
+  });
+  const workspaceId = resolvedWorkspaceId;
   const { user, status } = useAuth();
   const collaborationRequested =
     (location.state as { collaboration?: boolean } | null)?.collaboration === true ||
-    isCollaborationParam(searchParams.get("share")) ||
-    isCollaborationParam(searchParams.get("shared")) ||
-    isCollaborationParam(searchParams.get("collab")) ||
-    isCollaborationParam(searchParams.get("collaboration"));
+    collabRequested ||
+    (shareRequested && !collabRequested);
   
   // Store hooks
   const { recentDocuments, connectionStatus, saveStatus: globalSaveStatus, dispatch } = useAppStore();
@@ -56,7 +75,11 @@ export const Editor = () => {
   const { toggleStar } = useStarToggle();
   
   // Document hooks
-  const { document, updateDocument, setLocalDocument, loading, error, saveStatus } = useDocument(id, workspaceId);
+  const { document, updateDocument, setLocalDocument, loading, error, saveStatus } = useDocument(
+    id,
+    workspaceId,
+    { shareToken: shareToken ?? undefined }
+  );
   const activeDocument = id ? (document?.id === id ? document : null) : document;
   const documentRef = useRef(activeDocument);
   const updateDocumentRef = useRef(updateDocument);
@@ -68,6 +91,8 @@ export const Editor = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "local" | "remote">("idle");
+  const [shareValidationError, setShareValidationError] = useState<string | null>(null);
+  const [isValidatingShare, setIsValidatingShare] = useState(false);
   
   // Conflict Modal State
   const [showConflictModal, setShowConflictModal] = useState(false);
@@ -99,6 +124,41 @@ export const Editor = () => {
     isActive
       ? "flex items-center gap-3 rounded-lg bg-[#e7e7f3] px-3 py-2 text-[#0d0e1b] dark:bg-[#1c1d3a] dark:text-white"
       : "flex items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] hover:bg-[#e7e7f3]/50 dark:text-[#8a8bbd] dark:hover:bg-[#1c1d3a]/50";
+
+  useEffect(() => {
+    if (queryWorkspaceId && queryWorkspaceId !== resolvedWorkspaceId) {
+      setResolvedWorkspaceId(queryWorkspaceId);
+    }
+  }, [queryWorkspaceId, resolvedWorkspaceId]);
+
+  useEffect(() => {
+    if (!shareToken) {
+      setShareValidationError(null);
+      setIsValidatingShare(false);
+      return;
+    }
+
+    let isActive = true;
+    setIsValidatingShare(true);
+    setShareValidationError(null);
+
+    validateShareToken(shareToken)
+      .then(() => {
+        if (isActive) {
+          setIsValidatingShare(false);
+        }
+      })
+      .catch((err) => {
+        if (isActive) {
+          setIsValidatingShare(false);
+          setShareValidationError(err instanceof Error ? err.message : "Share link is invalid");
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [shareToken]);
   
   // Sync connection status with online status
   useEffect(() => {
@@ -129,6 +189,9 @@ export const Editor = () => {
   
   // Fetch recent documents
   useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
     const loadRecentDocuments = async () => {
       try {
         const docs = await fetchDocuments(workspaceId);
@@ -153,6 +216,34 @@ export const Editor = () => {
   useEffect(() => {
     updateDocumentRef.current = updateDocument;
   }, [updateDocument]);
+
+  useEffect(() => {
+    if (!shareToken || !document?.workspaceId) {
+      return;
+    }
+
+    if (document.workspaceId !== resolvedWorkspaceId) {
+      setResolvedWorkspaceId(document.workspaceId);
+    }
+
+    if (document.workspaceId !== queryWorkspaceId) {
+      const params = new URLSearchParams(searchParams);
+      params.set("workspaceId", document.workspaceId);
+      navigate(`/editor/${encodeURIComponent(document.id)}?${params.toString()}`, {
+        replace: true,
+        state: { collaboration: collaborationRequested }
+      });
+    }
+  }, [
+    shareToken,
+    document?.workspaceId,
+    document?.id,
+    resolvedWorkspaceId,
+    queryWorkspaceId,
+    searchParams,
+    navigate,
+    collaborationRequested
+  ]);
 
   const debouncedYjsIndexUpdate = useMemo(
     () =>
@@ -232,7 +323,7 @@ export const Editor = () => {
   }, [workspaceId, dispatch]);
 
   const handleCreateDocument = useCallback(async () => {
-    if (isCreating) {
+    if (isCreating || !workspaceId) {
       return;
     }
 
@@ -293,7 +384,7 @@ export const Editor = () => {
   };
 
   const handleShareClick = useCallback(() => {
-    if (!documentId) {
+    if (!documentId || !workspaceId) {
       return;
     }
     setShowShareModal(true);
@@ -303,7 +394,7 @@ export const Editor = () => {
       }
       return { ...previous, [documentId]: true };
     });
-  }, [documentId]);
+  }, [documentId, workspaceId]);
 
   // Conflict resolution handlers
   const handleKeepLocal = useCallback(() => {
@@ -332,7 +423,9 @@ export const Editor = () => {
   }, []);
 
   const editorContent = (activeDocument?.content as JSONContent) ?? emptyContent;
-  const isEditable = Boolean(activeDocument) && !loading && !error;
+  const effectiveError = shareValidationError ?? error;
+  const effectiveLoading = loading || isValidatingShare;
+  const isEditable = Boolean(activeDocument) && !effectiveLoading && !effectiveError && Boolean(workspaceId);
   const searchActive = searchQuery.trim().length > 0;
   const collaborationEnabled = Boolean(
     documentId && (collaborationDocs[documentId] || collaborationRequested)
@@ -357,7 +450,7 @@ export const Editor = () => {
   }, [documentId]);
 
   useEffect(() => {
-    if (!documentId) {
+    if (!documentId || !workspaceId) {
       return;
     }
     return subscribeToStarUpdates((update) => {
@@ -501,7 +594,7 @@ export const Editor = () => {
               className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-white shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-70"
               type="button"
               onClick={handleCreateDocument}
-              disabled={isCreating}
+              disabled={isCreating || !workspaceId}
             >
               <span className="material-symbols-outlined">add</span>
               <span>{isCreating ? "Creating..." : "New Document"}</span>
@@ -695,9 +788,10 @@ export const Editor = () => {
                   </span>
                 </button>
                 <button
-                  className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-bold text-white shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-bold text-white shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
                   type="button"
                   onClick={handleShareClick}
+                  disabled={!workspaceId || !documentId}
                 >
                   <span className="material-symbols-outlined !text-[18px]">share</span>
                   <span>Share</span>
@@ -732,8 +826,8 @@ export const Editor = () => {
               collaborationEnabled={collaborationEnabled}
                autoFocusTitle={shouldFocusTitle}
               docTitle={docTitle}
-              loading={loading}
-              error={error}
+              loading={effectiveLoading}
+              error={effectiveError}
             />
           </div>
 

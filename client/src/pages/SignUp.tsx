@@ -1,26 +1,133 @@
-import React, { useState } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { signUpWithEmail } from "../services/auth.service";
+import { SHARE_REDIRECT_STORAGE_KEY, useAuth } from "../auth/AuthContext";
+
+const isTruthyParam = (value: string | null) => {
+  if (value === null) {
+    return false;
+  }
+  if (value === "") {
+    return true;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+};
+
+const normalizeRedirectPath = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.startsWith("/") ? trimmed : null;
+};
+
+const resolveRedirectFromState = (state: unknown) => {
+  const from = (state as { from?: { pathname?: string; search?: string } } | null)?.from;
+  if (!from?.pathname) {
+    return null;
+  }
+  return `${from.pathname}${from.search ?? ""}`;
+};
 
 export const SignUp = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const { refresh, getRedirectPath } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
     password: ''
   });
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const shareToken =
+    searchParams.get("token")?.trim() || searchParams.get("shareToken")?.trim() || "";
+  const shareRequested =
+    isTruthyParam(searchParams.get("share")) || isTruthyParam(searchParams.get("shared"));
+  const collabRequested =
+    isTruthyParam(searchParams.get("collab")) || isTruthyParam(searchParams.get("collaboration"));
+  const workspaceIdParam = searchParams.get("workspaceId")?.trim() || "";
+  const redirectPath =
+    normalizeRedirectPath(searchParams.get("redirect")) || resolveRedirectFromState(location.state);
 
-  const handleSubmit = (e:any) => {
-    e.preventDefault();
-    console.log('Form submitted:', formData);
+  useEffect(() => {
+    if (!shareToken || !redirectPath) {
+      return;
+    }
+    const payload = {
+      path: redirectPath,
+      token: shareToken,
+      share: shareRequested,
+      collab: collabRequested,
+      workspaceId: workspaceIdParam || undefined
+    };
+    try {
+      sessionStorage.setItem(SHARE_REDIRECT_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // Ignore storage errors; fallback redirect still works via state.
+    }
+  }, [shareToken, redirectPath, shareRequested, collabRequested, workspaceIdParam]);
+
+  const signInLink = useMemo(() => {
+    if (!shareToken) {
+      return "/auth/sign-in";
+    }
+    const params = new URLSearchParams();
+    params.set("token", shareToken);
+    if (shareRequested) {
+      params.set("share", "true");
+    }
+    if (collabRequested) {
+      params.set("collab", "true");
+    }
+    if (workspaceIdParam) {
+      params.set("workspaceId", workspaceIdParam);
+    }
+    if (redirectPath) {
+      params.set("redirect", redirectPath);
+    }
+    return `/auth/sign-in?${params.toString()}`;
+  }, [shareToken, shareRequested, collabRequested, workspaceIdParam, redirectPath]);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (loading) {
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      const result = await signUpWithEmail(
+        formData.fullName.trim(),
+        formData.email.trim(),
+        formData.password
+      );
+      if (result.token) {
+        localStorage.setItem("auth_token", result.token);
+        localStorage.setItem("auth_provider", "better-auth");
+      }
+      await refresh();
+      const redirectTo = getRedirectPath(redirectPath ?? "/editor/recent");
+      navigate(redirectTo, { replace: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Sign up failed";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleGoogleSignUp = () => {
-    console.log('Google sign up clicked');
+    setError("Google sign-up is not available yet.");
   };
 
-  const handleChange = (e: any) => {
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     setFormData({
       ...formData,
-      [e.target.name]: e.target.value
+      [event.target.name]: event.target.value
     });
   };
 
@@ -85,7 +192,7 @@ export const SignUp = () => {
           </div>
 
           {/* Form Section */}
-          <div className="flex flex-col gap-6">
+          <form className="flex flex-col gap-6" onSubmit={handleSubmit}>
             {/* Full Name */}
             <div className="flex flex-col gap-2.5">
               <label className="text-white text-sm font-semibold">Full Name</label>
@@ -96,6 +203,7 @@ export const SignUp = () => {
                 className="w-full bg-[#18181f] border border-[#2a2a35] text-white rounded-2xl h-14 px-5 focus:ring-2 focus:ring-[#8b7bf8] focus:border-transparent transition-all placeholder:text-gray-500 outline-none"
                 placeholder="Enter your name"
                 type="text"
+                required
               />
             </div>
 
@@ -109,6 +217,7 @@ export const SignUp = () => {
                 className="w-full bg-[#18181f] border border-[#2a2a35] text-white rounded-2xl h-14 px-5 focus:ring-2 focus:ring-[#8b7bf8] focus:border-transparent transition-all placeholder:text-gray-500 outline-none"
                 placeholder="name@company.com"
                 type="email"
+                required
               />
             </div>
 
@@ -123,6 +232,7 @@ export const SignUp = () => {
                   className="w-full bg-[#18181f] border border-[#2a2a35] text-white rounded-2xl h-14 px-5 pr-14 focus:ring-2 focus:ring-[#8b7bf8] focus:border-transparent transition-all placeholder:text-gray-500 outline-none"
                   placeholder="Create a password"
                   type={showPassword ? 'text' : 'password'}
+                  required
                 />
                 <button
                   onClick={() => setShowPassword(!showPassword)}
@@ -145,11 +255,13 @@ export const SignUp = () => {
 
             {/* Create Account Button */}
             <button
-              onClick={handleSubmit}
-              className="w-full bg-gradient-to-r from-[#8b7bf8] to-[#9d8dff] hover:opacity-90 transition-opacity flex h-14 items-center justify-center rounded-2xl text-white font-bold text-base shadow-lg mt-2"
+              className="w-full bg-gradient-to-r from-[#8b7bf8] to-[#9d8dff] hover:opacity-90 transition-opacity flex h-14 items-center justify-center rounded-2xl text-white font-bold text-base shadow-lg mt-2 disabled:cursor-not-allowed disabled:opacity-70"
+              type="submit"
+              disabled={loading}
             >
-              Create Account
+              {loading ? "Creating..." : "Create Account"}
             </button>
+            {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
             {/* Divider */}
             <div className="relative my-2">
@@ -165,6 +277,7 @@ export const SignUp = () => {
             <button
               onClick={handleGoogleSignUp}
               className="w-full bg-[#18181f] border border-[#2a2a35] hover:bg-[#1f1f28] transition-colors flex h-14 items-center justify-center rounded-2xl text-white font-semibold text-base gap-3"
+              type="button"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"></path>
@@ -174,13 +287,15 @@ export const SignUp = () => {
               </svg>
               Sign up with Google
             </button>
-          </div>
+          </form>
 
           {/* Footer Links */}
           <div className="text-center mt-8">
             <p className="text-gray-400 text-sm">
               Already have an account? 
-              <a className="text-[#8b7bf8] font-bold hover:underline ml-1" href="#">Sign In</a>
+              <Link className="text-[#8b7bf8] font-bold hover:underline ml-1" to={signInLink}>
+                Sign In
+              </Link>
             </p>
           </div>
 
@@ -197,4 +312,3 @@ export const SignUp = () => {
     </div>
   );
 }
-

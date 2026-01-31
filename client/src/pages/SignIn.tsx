@@ -1,18 +1,94 @@
-import { useState, type FormEvent } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { OAuthGoogleButton } from "./OAuthGoogleButton";
 import { signInWithEmail } from "../services/auth.service";
-import { useAuth } from "../auth/AuthContext";
+import { SHARE_REDIRECT_STORAGE_KEY, useAuth } from "../auth/AuthContext";
+
+const isTruthyParam = (value: string | null) => {
+  if (value === null) {
+    return false;
+  }
+  if (value === "") {
+    return true;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+};
+
+const normalizeRedirectPath = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.startsWith("/") ? trimmed : null;
+};
+
+const resolveRedirectFromState = (state: unknown) => {
+  const from = (state as { from?: { pathname?: string; search?: string } } | null)?.from;
+  if (!from?.pathname) {
+    return null;
+  }
+  return `${from.pathname}${from.search ?? ""}`;
+};
 
 export const SignIn = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { refresh } = useAuth();
+  const [searchParams] = useSearchParams();
+  const { refresh, getRedirectPath } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const shareToken =
+    searchParams.get("token")?.trim() || searchParams.get("shareToken")?.trim() || "";
+  const shareRequested =
+    isTruthyParam(searchParams.get("share")) || isTruthyParam(searchParams.get("shared"));
+  const collabRequested =
+    isTruthyParam(searchParams.get("collab")) || isTruthyParam(searchParams.get("collaboration"));
+  const workspaceIdParam = searchParams.get("workspaceId")?.trim() || "";
+  const redirectPath =
+    normalizeRedirectPath(searchParams.get("redirect")) || resolveRedirectFromState(location.state);
+
+  useEffect(() => {
+    if (!shareToken || !redirectPath) {
+      return;
+    }
+    const payload = {
+      path: redirectPath,
+      token: shareToken,
+      share: shareRequested,
+      collab: collabRequested,
+      workspaceId: workspaceIdParam || undefined
+    };
+    try {
+      sessionStorage.setItem(SHARE_REDIRECT_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // Ignore storage errors; fallback redirect still works via state.
+    }
+  }, [shareToken, redirectPath, shareRequested, collabRequested, workspaceIdParam]);
+
+  const signUpLink = useMemo(() => {
+    if (!shareToken) {
+      return "/auth/sign-up";
+    }
+    const params = new URLSearchParams();
+    params.set("token", shareToken);
+    if (shareRequested) {
+      params.set("share", "true");
+    }
+    if (collabRequested) {
+      params.set("collab", "true");
+    }
+    if (workspaceIdParam) {
+      params.set("workspaceId", workspaceIdParam);
+    }
+    if (redirectPath) {
+      params.set("redirect", redirectPath);
+    }
+    return `/auth/sign-up?${params.toString()}`;
+  }, [shareToken, shareRequested, collabRequested, workspaceIdParam, redirectPath]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -24,8 +100,7 @@ export const SignIn = () => {
       localStorage.setItem("auth_token", result.token);
       localStorage.setItem("auth_provider", "better-auth");
       await refresh();
-      const redirectTo =
-        (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? "/editor/recent";
+      const redirectTo = getRedirectPath(redirectPath ?? "/editor/recent");
       navigate(redirectTo, { replace: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Sign in failed";
@@ -89,7 +164,10 @@ export const SignIn = () => {
               <h2 className="text-4xl font-black leading-tight tracking-tight text-[#fafafa]">Sign In</h2>
               <p className="text-base text-gray-400">
                 New here?{" "}
-                <Link className="font-bold text-[#8b5cf6] transition-colors hover:text-[#a78bfa]" to="/auth/sign-up">
+                <Link
+                  className="font-bold text-[#8b5cf6] transition-colors hover:text-[#a78bfa]"
+                  to={signUpLink}
+                >
                   Create an account
                 </Link>
               </p>
