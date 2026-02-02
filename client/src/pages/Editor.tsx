@@ -21,7 +21,9 @@ import type { ServerSyncResponsePayload, ServerPresenceBroadcastPayload } from "
 import { subscribeToStarUpdates } from "../utils/starEvents";
 import { ConflictModal } from "../components/ConflictModal";
 import { ShareModal } from "../components/ShareModal";
+import { SaveConfirmationModal } from "../components/SaveConfirmationModal";
 import { resetProvider } from "../collaboration/yjsProvider";
+import { usePendingChanges } from "../hooks/usePendingChanges";
 
 const isTruthyParam = (value: string | null) => {
   if (value === null) {
@@ -103,7 +105,11 @@ export const Editor = () => {
   // Share Modal State
   const [showShareModal, setShowShareModal] = useState(false);
   
-  // Display helpers
+  // Save Confirmation Modal State
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  
+  // Display helpers - declare these early since they're used in conditional checks
+  const hasShareTokenError = Boolean(shareValidationError);
   const fallbackTitle = id ? id.replace(/-/g, " ") : "Untitled document";
   const docTitle = activeDocument?.title ?? fallbackTitle;
   const displayTitle = docTitle.trim().length > 0 ? docTitle : "Untitled document";
@@ -359,6 +365,24 @@ export const Editor = () => {
   const documentId = id ?? activeDocument?.id ?? null;
   const isStarred = Boolean(activeDocument?.isStarred);
   const canToggleStar = Boolean(activeDocument && documentId);
+  
+  // Declare collaborationEnabled early since it's used in usePendingChanges hook
+  const collaborationEnabled = Boolean(
+    documentId && (collaborationDocs[documentId] || collaborationRequested) && !hasShareTokenError
+  );
+  
+  // Pending Changes Hook (must be after documentId and collaborationEnabled are declared)
+  const {
+    pendingChanges,
+    isSaving: isSavingDocument,
+    hasPendingChanges,
+    totalPendingChanges,
+    saveDocument: saveDocumentWithChanges
+  } = usePendingChanges({
+    documentId: documentId || "",
+    workspaceId,
+    enabled: Boolean(documentId && workspaceId && collaborationEnabled)
+  });
 
   const applyLocalStarUpdate = useCallback(
     (nextIsStarred: boolean) => {
@@ -470,15 +494,41 @@ export const Editor = () => {
     });
   }, [id, workspaceId, navigate]);
 
+  // Handle save with pending changes
+  const handleSave = useCallback(() => {
+    if (hasPendingChanges) {
+      setShowSaveModal(true);
+    } else {
+      // Regular save without pending changes
+      saveDocumentWithChanges({ applyPendingChanges: true });
+    }
+  }, [hasPendingChanges, saveDocumentWithChanges]);
+
+  // Handle save confirmation - apply pending changes and save
+  const handleApplySave = useCallback(async () => {
+    try {
+      await saveDocumentWithChanges({ applyPendingChanges: true });
+      setShowSaveModal(false);
+    } catch (error) {
+      console.error("Failed to save document:", error);
+    }
+  }, [saveDocumentWithChanges]);
+
+  // Handle save without applying pending changes
+  const handleSaveOnly = useCallback(async () => {
+    try {
+      await saveDocumentWithChanges({ applyPendingChanges: false });
+      setShowSaveModal(false);
+    } catch (error) {
+      console.error("Failed to save document:", error);
+    }
+  }, [saveDocumentWithChanges]);
+
   const editorContent = (activeDocument?.content as JSONContent) ?? emptyContent;
   const effectiveError = shareValidationError ?? error;
   const effectiveLoading = loading || isValidatingShare;
   const isEditable = Boolean(activeDocument) && !effectiveLoading && !effectiveError && Boolean(workspaceId);
   const searchActive = searchQuery.trim().length > 0;
-  const hasShareTokenError = Boolean(shareValidationError);
-  const collaborationEnabled = Boolean(
-    documentId && (collaborationDocs[documentId] || collaborationRequested) && !hasShareTokenError
-  );
 
   useEffect(() => {
     if (!documentId || !collaborationRequested) {
@@ -808,6 +858,18 @@ export const Editor = () => {
               </div>
               <div className="h-6 w-px bg-[#e7e7f3] dark:bg-[#2d2e4a]"></div>
               <div className="flex items-center gap-2">
+                {hasPendingChanges && (
+                  <button
+                    className="flex h-9 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-bold text-white shadow-lg shadow-amber-500/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    type="button"
+                    onClick={handleSave}
+                    disabled={isSavingDocument}
+                    title={`${totalPendingChanges} pending changes`}
+                  >
+                    <span className="material-symbols-outlined !text-[18px]">save</span>
+                    <span>{isSavingDocument ? "Saving..." : `Save (${totalPendingChanges})`}</span>
+                  </button>
+                )}
                 <button
                   className="rounded-lg p-2 text-[#4c4d9a] transition-colors hover:bg-background-light dark:hover:bg-[#1c1d3a]"
                   type="button"
@@ -957,6 +1019,19 @@ export const Editor = () => {
           onTokenRevoked={handleTokenRevoked}
         />
       )}
+      
+      {/* Save Confirmation Modal */}
+      <SaveConfirmationModal
+        isOpen={showSaveModal}
+        documentId={documentId || ""}
+        documentTitle={displayTitle}
+        workspaceId={workspaceId}
+        pendingChanges={pendingChanges}
+        onApplySave={handleApplySave}
+        onSaveOnly={handleSaveOnly}
+        onCancel={() => setShowSaveModal(false)}
+        isSaving={isSavingDocument}
+      />
     </div>
   );
 };

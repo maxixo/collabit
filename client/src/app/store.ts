@@ -8,6 +8,31 @@ export interface Collaborator {
   color: string;
 }
 
+export interface ChangeEvent {
+  id: string;
+  documentId: string;
+  userId: string;
+  changeType: "insert" | "delete" | "update" | "format" | "title";
+  content: Record<string, unknown>;
+  position: number | null;
+  createdAt: string;
+  applied: boolean;
+  workspaceId: string;
+}
+
+export interface PendingChangesSummary {
+  userId: string;
+  changeCount: number;
+  firstChange: string;
+  lastChange: string;
+  changeTypes: string[];
+  user?: {
+    id: string;
+    displayName?: string;
+    email?: string;
+  };
+}
+
 export interface CursorPosition {
   userId: string;
   position: number;
@@ -37,6 +62,7 @@ export interface AppContextValue {
   connectionStatus: "online" | "offline" | "reconnecting";
   saveStatus: "saved" | "saving" | "error" | "conflict";
   presence: PresenceState;
+  pendingChanges: Record<string, PendingChangesSummary[]>;
   dispatch: Dispatch<AppAction>;
 }
 
@@ -52,6 +78,8 @@ type AppAction =
   | { type: "ADD_COLLABORATOR"; payload: Collaborator }
   | { type: "REMOVE_COLLABORATOR"; payload: string }
   | { type: "UPDATE_CURSOR"; payload: { userId: string; position: CursorPosition } }
+  | { type: "SET_PENDING_CHANGES"; payload: { documentId: string; changes: PendingChangesSummary[] } }
+  | { type: "CLEAR_PENDING_CHANGES"; payload: string }
   | { type: "RESET_STATE" };
 
 // Initial State
@@ -64,6 +92,7 @@ const initialState: AppContextValue = {
     collaborators: [],
     cursorPositions: new Map()
   },
+  pendingChanges: {},
   dispatch: () => {}
 };
 
@@ -141,9 +170,26 @@ const appReducer: Reducer<AppContextValue, AppAction> = (state, action) => {
         }
       };
     
+    case "SET_PENDING_CHANGES":
+      return {
+        ...state,
+        pendingChanges: {
+          ...state.pendingChanges,
+          [action.payload.documentId]: action.payload.changes
+        }
+      };
+
+    case "CLEAR_PENDING_CHANGES":
+      const updatedChanges = { ...state.pendingChanges };
+      delete updatedChanges[action.payload];
+      return {
+        ...state,
+        pendingChanges: updatedChanges
+      };
+
     case "RESET_STATE":
       return initialState;
-    
+
     default:
       return state;
   }
@@ -181,5 +227,7 @@ export const actions = {
   addCollaborator: (collaborator: Collaborator) => ({ type: "ADD_COLLABORATOR" as const, payload: collaborator }),
   removeCollaborator: (userId: string) => ({ type: "REMOVE_COLLABORATOR" as const, payload: userId }),
   updateCursor: (userId: string, position: CursorPosition) => ({ type: "UPDATE_CURSOR" as const, payload: { userId, position } }),
+  setPendingChanges: (documentId: string, changes: PendingChangesSummary[]) => ({ type: "SET_PENDING_CHANGES" as const, payload: { documentId, changes } }),
+  clearPendingChanges: (documentId: string) => ({ type: "CLEAR_PENDING_CHANGES" as const, payload: documentId }),
   resetState: () => ({ type: "RESET_STATE" as const })
 };

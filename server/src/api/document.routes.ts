@@ -18,6 +18,11 @@ import {
   updateDocument,
   validateDocumentAccessWithShare
 } from "../services/document.service.js";
+import {
+  getPendingChanges,
+  markAllChangesApplied,
+  markChangesApplied
+} from "../services/changeEvent.service.js";
 import { canEditDocument, getDocumentRole } from "../services/permission.service.js";
 import {
   generateShareToken,
@@ -572,6 +577,81 @@ documentRoutes.patch("/:id", async (req: AuthenticatedRequest, res, next) => {
     }
 
     res.json({ document: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get pending changes for a document
+documentRoutes.get("/:id/pending-changes", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!role) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const pendingChanges = await getPendingChanges(req.params.id, workspaceId);
+    res.json({ pendingChanges });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Save document with optional change application
+documentRoutes.post("/:id/save", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!canEditDocument(role)) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const { applyPendingChanges, specificUserChanges } = req.body as {
+      applyPendingChanges?: boolean;
+      specificUserChanges?: string[];
+    };
+
+    let appliedCount = 0;
+    if (applyPendingChanges) {
+      if (specificUserChanges && specificUserChanges.length > 0) {
+        // Apply specific user's changes
+        for (const targetUserId of specificUserChanges) {
+          const count = await markChangesApplied(req.params.id, targetUserId, workspaceId);
+          appliedCount += count;
+        }
+      } else {
+        // Apply all pending changes
+        appliedCount = await markAllChangesApplied(req.params.id, workspaceId);
+      }
+    }
+
+    res.json({
+      documentId: req.params.id,
+      saved: true,
+      appliedChanges: appliedCount,
+      message: `Document saved${appliedCount > 0 ? ` with ${appliedCount} pending changes applied` : ""}`
+    });
   } catch (error) {
     next(error);
   }

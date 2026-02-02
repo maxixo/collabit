@@ -19,4 +19,33 @@ export interface DocumentRecord {
   isStarred: boolean;
 }
 
+export interface ChangeEvent {
+  id: string;
+  documentId: string;
+  userId: string;
+  changeType: "insert" | "delete" | "update" | "format" | "title";
+  content: Record<string, unknown>;
+  position: number | null;
+  createdAt: string;
+  applied: boolean;
+  workspaceId: string;
+}
+
+export interface ChangeEventInput {
+  documentId: string;
+  userId: string;
+  changeType: "insert" | "delete" | "update" | "format" | "title";
+  content: Record<string, unknown>;
+  position?: number | null;
+  workspaceId: string;
+}
+
+export interface PendingChangesSummary {
+  userId: string;
+  changeCount: number;
+  firstChange: string;
+  lastChange: string;
+  changeTypes: string[];
+}
+
 // TODO: Add shared payload types for API and WebSocket events.

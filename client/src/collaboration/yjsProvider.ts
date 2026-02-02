@@ -1,6 +1,7 @@
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { WebsocketProvider as YWebsocketProvider } from "y-websocket";
+import { ChangeEventTracker, type ChangeEvent } from "../services/changeEvent.service";
 
 export interface YjsProvider {
   doc: Y.Doc;
@@ -16,6 +17,8 @@ interface WebSocketYjsProviderOptions {
   userId?: string;
   userName?: string;
   userImage?: string;
+  workspaceId?: string;
+  enableChangeTracking?: boolean;
 }
 
 class WebSocketYjsProvider implements YjsProvider {
@@ -27,7 +30,10 @@ class WebSocketYjsProvider implements YjsProvider {
   private readonly userId?: string;
   private readonly userName?: string;
   private readonly userImage?: string;
+  private readonly workspaceId?: string;
+  private readonly enableChangeTracking: boolean;
   private refCount = 1;
+  private changeTracker: ChangeEventTracker | null = null;
 
   constructor(documentId: string, options: WebSocketYjsProviderOptions = {}) {
     this.documentId = documentId;
@@ -35,11 +41,18 @@ class WebSocketYjsProvider implements YjsProvider {
     this.userId = options.userId;
     this.userName = options.userName;
     this.userImage = options.userImage;
+    this.workspaceId = options.workspaceId;
+    this.enableChangeTracking = options.enableChangeTracking ?? true;
 
     this.doc = new Y.Doc();
     // Ensure the collaboration fragment exists for TipTap bindings.
     this.doc.getXmlFragment("content");
     this.awareness = new Awareness(this.doc);
+    
+    // Initialize change tracking if enabled
+    if (this.enableChangeTracking && this.workspaceId) {
+      this.changeTracker = new ChangeEventTracker(documentId, this.workspaceId);
+    }
   }
 
   connect(): void {
@@ -91,6 +104,11 @@ class WebSocketYjsProvider implements YjsProvider {
     this.provider.on('connection-error', (event: Event, provider: YWebsocketProvider) => {
       console.error(`[YjsProvider] ${this.documentId} connection error:`, event);
     });
+    
+    // Set up change tracking for Y.js document
+    if (this.enableChangeTracking) {
+      this.setupChangeTracking();
+    }
   }
 
   disconnect(): void {
@@ -131,9 +149,93 @@ class WebSocketYjsProvider implements YjsProvider {
     this.refCount = 0;
     console.log(`[YjsProvider] ${this.documentId} force destroy`);
     this.disconnect();
+    this.cleanupChangeTracking();
     this.doc.destroy();
   }
 
+  /**
+   * Set up change tracking for Y.js document
+   */
+  private setupChangeTracking(): void {
+    if (!this.changeTracker) {
+      return;
+    }
+
+    // Get the content fragment
+    const contentFragment = this.doc.getXmlFragment("content");
+    
+    // Debounce change tracking to avoid excessive events
+    let changeTimeout: number | null = null;
+    
+    contentFragment.observe((event) => {
+      if (!this.userId || changeTimeout) {
+        return;
+      }
+      
+      // Clear previous timeout
+      if (changeTimeout) {
+        clearTimeout(changeTimeout);
+      }
+      
+      // Debounce for 500ms to batch changes
+      changeTimeout = window.setTimeout(() => {
+        if (!this.changeTracker || !this.userId) {
+          return;
+        }
+        
+        // Track the change event
+        const changeType = this.determineChangeType(event);
+        
+        void this.changeTracker.trackChange(
+          changeType,
+          {
+            delta: JSON.stringify(event.changes.delta),
+            added: event.changes.added.size,
+            deleted: event.changes.deleted.size
+          },
+          null
+        );
+        
+        changeTimeout = null;
+      }, 500);
+    });
+  }
+  
+  /**
+   * Determine the type of change based on Y.js event
+   */
+  private determineChangeType(event: Y.YXmlEvent): ChangeEvent["changeType"] {
+    const hasAdded = event.changes.added.size > 0;
+    const hasDeleted = event.changes.deleted.size > 0;
+    
+    if (hasAdded && !hasDeleted) {
+      return "insert";
+    } else if (!hasAdded && hasDeleted) {
+      return "delete";
+    } else if (hasAdded && hasDeleted) {
+      return "update";
+    }
+    
+    return "update";
+  }
+  
+  /**
+   * Clean up change tracking
+   */
+  private cleanupChangeTracking(): void {
+    if (this.changeTracker) {
+      this.changeTracker.destroy();
+      this.changeTracker = null;
+    }
+  }
+  
+  /**
+   * Get pending change count (for offline mode)
+   */
+  getPendingChangeCount(): number {
+    return this.changeTracker?.getPendingCount() ?? 0;
+  }
+  
   /**
    * Generate a consistent color for a user based on their ID
    */
@@ -161,6 +263,17 @@ export const getYjsProvider = (documentId: string, options?: WebSocketYjsProvide
   const provider = providers.get(documentId)!;
   provider.incrementRefCount();
   return provider;
+};
+
+/**
+ * Get pending change count for a document (for offline mode)
+ */
+export const getPendingChangeCount = (documentId: string): number => {
+  const provider = providers.get(documentId);
+  if (!provider || !('getPendingChangeCount' in provider)) {
+    return 0;
+  }
+  return (provider as WebSocketYjsProvider).getPendingChangeCount();
 };
 
 export const resetProvider = (documentId: string): void => {

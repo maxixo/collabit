@@ -1,4 +1,4 @@
-import type { Server } from "http";
+import type { IncomingMessage, Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { registerDocumentSocket } from "./documentSocket.js";
 import { registerPresenceSocket } from "./presenceSocket.js";
@@ -142,18 +142,31 @@ export const initWebSocketServer = (server: Server) => {
  * Authenticate a WebSocket connection
  * Uses the same authentication as HTTP requests
  */
-const authenticateSocket = async (request: unknown) => {
+const authenticateSocket = async (request: IncomingMessage) => {
   try {
-    // Create a fake request object for auth middleware
+    const cookieHeader = request.headers.cookie;
+    const hostHeader = request.headers.host;
+    const forwardedProto = request.headers["x-forwarded-proto"];
+    const protocol = Array.isArray(forwardedProto)
+      ? forwardedProto[0]
+      : forwardedProto ?? (request.socket as { encrypted?: boolean }).encrypted
+        ? "https"
+        : "http";
+
+    // Create a minimal Express-like request object for auth middleware
     const fakeRequest = {
-      headers: {
-        get: (name: string) => {
-          if (name === "cookie") {
-            const req = request as { headers?: { cookie?: string } };
-            return req.headers?.cookie;
-          }
-          return undefined;
+      protocol,
+      get: (name: string) => {
+        if (name.toLowerCase() === "host") {
+          return Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
         }
+        return undefined;
+      },
+      header: (name: string) => {
+        if (name.toLowerCase() === "cookie") {
+          return Array.isArray(cookieHeader) ? cookieHeader[0] : cookieHeader;
+        }
+        return undefined;
       }
     };
 
