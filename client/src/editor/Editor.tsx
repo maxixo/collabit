@@ -63,6 +63,7 @@ type EditorSurfaceProps = {
   autoFocusTitle?: boolean;
   loading?: boolean;
   error?: string | null;
+  shareToken?: string | null;
 };
 
 export const EditorSurface = ({
@@ -79,7 +80,8 @@ export const EditorSurface = ({
   autoFocusTitle = false,
   docTitle,
   loading = false,
-  error = null
+  error = null,
+  shareToken = null
 }: EditorSurfaceProps) => {
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const onStatsChangeRef = useRef(onStatsChange);
@@ -170,13 +172,18 @@ export const EditorSurface = ({
       return;
     }
 
-    const nextProvider = getYjsProvider(documentId);
+    const nextProvider = getYjsProvider(documentId, {
+      token: shareToken ?? undefined,
+      userId: presenceUserId ?? undefined,
+      userName: presenceName,
+      userImage: presenceAvatar
+    });
     setProviderState({ documentId, provider: nextProvider });
 
     return () => {
       destroyYjsProvider(documentId);
     };
-  }, [documentId, collaborationEnabled]);
+  }, [documentId, collaborationEnabled, shareToken, presenceUserId, presenceName, presenceAvatar]);
 
   useEffect(() => {
     if (!documentId || !presenceUserId || !collaborationEnabled) {

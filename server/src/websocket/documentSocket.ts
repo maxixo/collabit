@@ -3,6 +3,10 @@ import { ClientEvent, ServerEvent } from "@shared/events.js";
 import type { ServerSyncResponsePayload, ServerAccessDeniedPayload } from "@shared/types.js";
 import { logger } from "../utils/logger.js";
 import { getDocumentById } from "../services/document.service.js";
+import { createYjsServer } from "../collaboration/yjsServer.js";
+
+// Initialize YJS server instance
+const yjsServer = createYjsServer();
 
 /**
  * Metadata for each WebSocket connection
@@ -74,6 +78,9 @@ const handleDocumentOpen = async (
     socketMetadata.set(socket, metadata);
 
     logger.info(`User ${metadata.userId} opened document ${documentId}`);
+
+    // Attach YJS server to this WebSocket connection for real-time collaboration
+    yjsServer.attach(socket, documentId, metadata.userId);
 
     // Send sync response with document data
     const response: ServerSyncResponsePayload = {

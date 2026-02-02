@@ -21,6 +21,7 @@ import type { ServerSyncResponsePayload, ServerPresenceBroadcastPayload } from "
 import { subscribeToStarUpdates } from "../utils/starEvents";
 import { ConflictModal } from "../components/ConflictModal";
 import { ShareModal } from "../components/ShareModal";
+import { resetProvider } from "../collaboration/yjsProvider";
 
 const isTruthyParam = (value: string | null) => {
   if (value === null) {
@@ -151,7 +152,15 @@ export const Editor = () => {
       .catch((err) => {
         if (isActive) {
           setIsValidatingShare(false);
-          setShareValidationError(err instanceof Error ? err.message : "Share link is invalid");
+          const errorMessage = err instanceof Error ? err.message : "Share link is invalid";
+          // Provide user-friendly error messages
+          if (errorMessage === "Share token not found") {
+            setShareValidationError("This share link has been revoked or no longer exists. Please generate a new link.");
+          } else if (errorMessage === "Share token expired") {
+            setShareValidationError("This share link has expired. Please generate a new link.");
+          } else {
+            setShareValidationError(errorMessage);
+          }
         }
       });
 
@@ -422,13 +431,53 @@ export const Editor = () => {
     setShowConflictModal(false);
   }, []);
 
+  // Handle token revocation - clean up collaboration state
+  const handleTokenRevoked = useCallback(() => {
+    if (!documentId) {
+      return;
+    }
+    
+    // Reset YJS provider to clean up collaboration state
+    resetProvider(documentId);
+    
+    // Remove from collaboration docs state
+    setCollaborationDocs((previous) => {
+      const newState = { ...previous };
+      delete newState[documentId];
+      return newState;
+    });
+    
+    // Disconnect WebSocket if connected
+    if (wsManagerRef.current) {
+      wsManagerRef.current.disconnect();
+    }
+    
+    // Clear active room reference
+    activeRoomRef.current = null;
+    
+    // Clear share token validation error
+    setShareValidationError(null);
+  }, [documentId]);
+
+  // Handle clearing invalid share token from URL
+  const handleClearShareToken = useCallback(() => {
+    if (!id || !workspaceId) {
+      return;
+    }
+    // Navigate to clean URL without share token
+    navigate(`/editor/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(workspaceId)}`, {
+      replace: true
+    });
+  }, [id, workspaceId, navigate]);
+
   const editorContent = (activeDocument?.content as JSONContent) ?? emptyContent;
   const effectiveError = shareValidationError ?? error;
   const effectiveLoading = loading || isValidatingShare;
   const isEditable = Boolean(activeDocument) && !effectiveLoading && !effectiveError && Boolean(workspaceId);
   const searchActive = searchQuery.trim().length > 0;
+  const hasShareTokenError = Boolean(shareValidationError);
   const collaborationEnabled = Boolean(
-    documentId && (collaborationDocs[documentId] || collaborationRequested)
+    documentId && (collaborationDocs[documentId] || collaborationRequested) && !hasShareTokenError
   );
 
   useEffect(() => {
@@ -811,6 +860,40 @@ export const Editor = () => {
             </div>
           </header>
 
+          {hasShareTokenError && (
+            <div className="mx-auto mt-4 max-w-2xl rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/50 dark:bg-amber-950/30">
+              <div className="flex items-start gap-3">
+                <span className="material-symbols-outlined mt-0.5 text-amber-600 dark:text-amber-400">
+                  warning
+                </span>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-amber-900 dark:text-amber-200">Share Link Issue</h3>
+                  <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
+                    {shareValidationError}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      className="flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
+                      type="button"
+                      onClick={handleShareClick}
+                    >
+                      <span className="material-symbols-outlined !text-[16px]">add_link</span>
+                      Generate New Link
+                    </button>
+                    <button
+                      className="flex items-center gap-1.5 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
+                      type="button"
+                      onClick={handleClearShareToken}
+                    >
+                      <span className="material-symbols-outlined !text-[16px]">close</span>
+                      Clear and Continue
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="editor-grid relative flex-1 overflow-y-auto dark:bg-[#0b0c18]">
             <EditorSurface
               key={documentId || "no-doc"}
@@ -824,10 +907,11 @@ export const Editor = () => {
               onCursorUpdate={sendCursorUpdate}
               onSelectionUpdate={sendSelectionUpdate}
               collaborationEnabled={collaborationEnabled}
-               autoFocusTitle={shouldFocusTitle}
+              autoFocusTitle={shouldFocusTitle}
               docTitle={docTitle}
               loading={effectiveLoading}
               error={effectiveError}
+              shareToken={shareToken}
             />
           </div>
 
@@ -870,6 +954,7 @@ export const Editor = () => {
           documentId={documentId}
           workspaceId={workspaceId}
           onClose={() => setShowShareModal(false)}
+          onTokenRevoked={handleTokenRevoked}
         />
       )}
     </div>

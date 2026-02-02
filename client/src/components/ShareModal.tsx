@@ -10,6 +10,7 @@ interface ShareModalProps {
   documentId: string;
   workspaceId: string;
   onClose: () => void;
+  onTokenRevoked?: () => void;
 }
 
 type ExpirationOption = "never" | "7d" | "30d" | "custom";
@@ -34,7 +35,7 @@ const formatExpiration = (value: string | null) => {
   return date.toLocaleDateString();
 };
 
-export const ShareModal = ({ documentId, workspaceId, onClose }: ShareModalProps) => {
+export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }: ShareModalProps) => {
   const [permission, setPermission] = useState<SharePermissionOption>("viewer");
   const [expirationOption, setExpirationOption] = useState<ExpirationOption>("never");
   const [customExpiration, setCustomExpiration] = useState("");
@@ -190,6 +191,8 @@ export const ShareModal = ({ documentId, workspaceId, onClose }: ShareModalProps
         setGeneratedToken(null);
       }
       await refreshTokens();
+      // Notify parent component to clean up collaboration state
+      onTokenRevoked?.();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to revoke share link");
     } finally {
