@@ -7,6 +7,7 @@ import { Editor } from "../pages/Editor";
 import { Recent } from "../pages/Recent";
 import { Starred } from "../pages/Starred";
 import { Trash } from "../pages/Trash";
+import { Profile } from "../pages/Profile";
 
 const isTruthyParam = (value: string | null) => {
   if (value === null) {
@@ -101,6 +102,14 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <Trash />
+      </ProtectedRoute>
+    )
+  },
+  {
+    path: "/profile",
+    element: (
+      <ProtectedRoute>
+        <Profile />
       </ProtectedRoute>
     )
   },

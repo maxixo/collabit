@@ -7,7 +7,6 @@ import { useDocument } from "../hooks/useDocument";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { usePresence } from "../hooks/usePresence";
 import { useStarToggle } from "../hooks/useStarToggle";
-import { useAuth } from "../auth/AuthContext";
 import { useAppStore, actions, type Collaborator } from "../app/store";
 import { createDocument, fetchDocuments } from "../services/document.service";
 import { validateShareToken } from "../services/share.service";
@@ -20,8 +19,10 @@ import { ClientEvent } from "@shared/events";
 import type { ServerSyncResponsePayload, ServerPresenceBroadcastPayload } from "@shared/types";
 import { subscribeToStarUpdates } from "../utils/starEvents";
 import { ConflictModal } from "../components/ConflictModal";
+import { UserMenu } from "../components/UserMenu";
 import { ShareModal } from "../components/ShareModal";
 import { SaveConfirmationModal } from "../components/SaveConfirmationModal";
+import { HistoryModal } from "../components/HistoryModal";
 import { resetProvider } from "../collaboration/yjsProvider";
 import { usePendingChanges } from "../hooks/usePendingChanges";
 
@@ -63,7 +64,6 @@ export const Editor = () => {
     return queryWorkspaceId || "default";
   });
   const workspaceId = resolvedWorkspaceId;
-  const { user, status } = useAuth();
   const collaborationRequested =
     (location.state as { collaboration?: boolean } | null)?.collaboration === true ||
     collabRequested ||
@@ -108,22 +108,15 @@ export const Editor = () => {
   // Save Confirmation Modal State
   const [showSaveModal, setShowSaveModal] = useState(false);
   
+  // History Modal State
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  
   // Display helpers - declare these early since they're used in conditional checks
   const hasShareTokenError = Boolean(shareValidationError);
   const fallbackTitle = id ? id.replace(/-/g, " ") : "Untitled document";
   const docTitle = activeDocument?.title ?? fallbackTitle;
   const displayTitle = docTitle.trim().length > 0 ? docTitle : "Untitled document";
   const shouldFocusTitle = Boolean((location.state as { focusTitle?: boolean } | null)?.focusTitle);
-  const userLabel = useMemo(() => {
-    if (status !== "authenticated") {
-      return "User";
-    }
-    return user?.name?.trim() || user?.email?.trim() || "User";
-  }, [status, user]);
-  const userInitial = useMemo(() => {
-    const firstWord = userLabel.split(/\s+/)[0];
-    return firstWord ? firstWord.charAt(0).toUpperCase() : "U";
-  }, [userLabel]);
   const isRecentRoute = location.pathname === "/editor/recent";
   const isStarredRoute = location.pathname === "/editor/starred";
 
@@ -524,6 +517,34 @@ export const Editor = () => {
     }
   }, [saveDocumentWithChanges]);
 
+  // Handle history restore
+  const handleHistoryRestore = useCallback((content: JSONContent) => {
+    if (!activeDocument) {
+      return;
+    }
+    
+    const nextDocument = {
+      ...activeDocument,
+      content: content as Record<string, unknown>,
+      updatedAt: new Date().toISOString()
+    };
+
+    documentRef.current = nextDocument;
+    updateDocumentRef.current(nextDocument);
+    
+    // Update in recent documents list
+    if (activeDocument.id) {
+      dispatch(actions.updateRecentDocument({
+        id: activeDocument.id,
+        title: activeDocument.title,
+        updatedAt: new Date().toISOString(),
+        ownerId: activeDocument.ownerId,
+        workspaceId: activeDocument.workspaceId || workspaceId,
+        isStarred: activeDocument.isStarred
+      }));
+    }
+  }, [activeDocument, workspaceId, dispatch]);
+
   const editorContent = (activeDocument?.content as JSONContent) ?? emptyContent;
   const effectiveError = shareValidationError ?? error;
   const effectiveLoading = loading || isValidatingShare;
@@ -873,6 +894,9 @@ export const Editor = () => {
                 <button
                   className="rounded-lg p-2 text-[#4c4d9a] transition-colors hover:bg-background-light dark:hover:bg-[#1c1d3a]"
                   type="button"
+                  onClick={() => setShowHistoryModal(true)}
+                  disabled={!workspaceId || !documentId}
+                  title="View document history"
                 >
                   <span className="material-symbols-outlined">history</span>
                 </button>
@@ -907,17 +931,7 @@ export const Editor = () => {
                   <span className="material-symbols-outlined !text-[18px]">share</span>
                   <span>Share</span>
                 </button>
-                <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[#e7e7f3] text-sm font-bold text-[#4c4d9a] dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9]">
-                  {user?.image ? (
-                    <img
-                      className="h-full w-full object-cover"
-                      src={user.image}
-                      alt={`${userLabel} profile`}
-                    />
-                  ) : (
-                    <span aria-hidden="true">{userInitial}</span>
-                  )}
-                </div>
+                <UserMenu />
               </div>
             </div>
           </header>
@@ -1032,6 +1046,18 @@ export const Editor = () => {
         onCancel={() => setShowSaveModal(false)}
         isSaving={isSavingDocument}
       />
+      
+      {/* History Modal */}
+      {showHistoryModal && documentId && (
+        <HistoryModal
+          isOpen={showHistoryModal}
+          onClose={() => setShowHistoryModal(false)}
+          documentId={documentId}
+          workspaceId={workspaceId}
+          documentTitle={displayTitle}
+          onRestore={handleHistoryRestore}
+        />
+      )}
     </div>
   );
 };

@@ -32,6 +32,10 @@ import {
   revokeShareToken,
   validateShareToken
 } from "../services/shareToken.service.js";
+import {
+  getDocumentVersions,
+  restoreDocumentVersion
+} from "../services/documentVersion.service.js";
 
 export const documentRoutes = Router();
 
@@ -603,6 +607,75 @@ documentRoutes.get("/:id/pending-changes", async (req: AuthenticatedRequest, res
 
     const pendingChanges = await getPendingChanges(req.params.id, workspaceId);
     res.json({ pendingChanges });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get document history/versions
+documentRoutes.get("/:id/history", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!role) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const versions = await getDocumentVersions(req.params.id, workspaceId);
+    res.json({ versions });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Restore document to a specific version
+documentRoutes.post("/:id/restore", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const { versionNumber } = req.body as { versionNumber: number };
+    if (typeof versionNumber !== "number" || versionNumber < 1) {
+      res.status(400).json({ message: "versionNumber must be a positive integer" });
+      return;
+    }
+
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!canEditDocument(role)) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const restoredContent = await restoreDocumentVersion(
+      req.params.id,
+      versionNumber,
+      workspaceId
+    );
+
+    res.json({
+      documentId: req.params.id,
+      versionNumber,
+      restored: true,
+      content: restoredContent,
+      message: `Document restored to version ${versionNumber}`
+    });
   } catch (error) {
     next(error);
   }

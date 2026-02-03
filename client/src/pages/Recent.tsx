@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useAppStore, actions } from "../app/store";
-import { useAuth } from "../auth/AuthContext";
 import { ConfirmationModal } from "../components/ConfirmationModal";
+import { UserMenu } from "../components/UserMenu";
 import { useStarToggle } from "../hooks/useStarToggle";
 import {
   fetchDocuments,
@@ -12,7 +12,6 @@ import {
 
 export const Recent = () => {
   const { recentDocuments, activeDocumentId, dispatch } = useAppStore();
-  const { user, status } = useAuth();
   const location = useLocation();
   const { toggleStar } = useStarToggle();
   const [searchParams] = useSearchParams();
@@ -20,16 +19,6 @@ export const Recent = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingTrashDocument, setPendingTrashDocument] = useState<DocumentSummary | null>(null);
   const showSkeleton = isSyncing && recentDocuments.length === 0;
-  const userLabel = useMemo(() => {
-    if (status !== "authenticated") {
-      return "User";
-    }
-    return user?.name?.trim() || user?.email?.trim() || "User";
-  }, [status, user]);
-  const userInitial = useMemo(() => {
-    const firstWord = userLabel.split(/\s+/)[0];
-    return firstWord ? firstWord.charAt(0).toUpperCase() : "U";
-  }, [userLabel]);
   const isRecentRoute = location.pathname === "/editor/recent";
   const isStarredRoute = location.pathname === "/editor/starred";
   const isTrashRoute = location.pathname === "/editor/trash";
@@ -236,17 +225,7 @@ export const Recent = () => {
               >
                 <span className="material-symbols-outlined">help</span>
               </button>
-              <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[#e7e7f3] text-sm font-bold text-[#4c4d9a] dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9]">
-                {user?.image ? (
-                  <img
-                    className="h-full w-full object-cover"
-                    src={user.image}
-                    alt={`${userLabel} profile`}
-                  />
-                ) : (
-                  <span aria-hidden="true">{userInitial}</span>
-                )}
-              </div>
+              <UserMenu />
             </div>
           </header>
 
