@@ -54,7 +54,7 @@ export const usePendingChanges = ({
       setError(null);
 
       const response = await fetch(
-        `${API_BASE_URL}/documents/${documentId}/pending-changes?workspaceId=${workspaceId}`,
+        `${API_BASE_URL}/api/documents/${documentId}/pending-changes?workspaceId=${workspaceId}`,
         {
           method: "GET",
           headers: {
@@ -92,7 +92,7 @@ export const usePendingChanges = ({
         dispatch(actions.setSaveStatus("saving"));
 
         const response = await fetch(
-          `${API_BASE_URL}/documents/${documentId}/save?workspaceId=${workspaceId}`,
+          `${API_BASE_URL}/api/documents/${documentId}/save?workspaceId=${workspaceId}`,
           {
             method: "POST",
             headers: {

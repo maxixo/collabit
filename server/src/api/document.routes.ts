@@ -615,19 +615,26 @@ documentRoutes.get("/:id/pending-changes", async (req: AuthenticatedRequest, res
 // Get document history/versions
 documentRoutes.get("/:id/history", async (req: AuthenticatedRequest, res, next) => {
   try {
-    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
-    if (!workspaceId) {
-      res.status(400).json({ message: "workspaceId is required" });
+    let workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const userId = req.user?.id ?? "";
+    const shareToken = req.shareToken;
+
+    const access = await validateDocumentAccessWithShare(req.params.id, userId, shareToken);
+    if (!access.allowed) {
+      if (access.reason === "not_found") {
+        res.status(404).json({ message: "Document not found" });
+        return;
+      }
+      res.status(403).json({ message: "Access denied" });
       return;
     }
 
-    const userId = requireUserId(req, res);
-    if (!userId) {
-      return;
+    if (!workspaceId && access.source === "share") {
+      workspaceId = access.workspaceId;
     }
-    const role = await getDocumentRole(userId, req.params.id, workspaceId);
-    if (!role) {
-      res.status(403).json({ message: "Access denied" });
+
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
       return;
     }
 
@@ -641,24 +648,37 @@ documentRoutes.get("/:id/history", async (req: AuthenticatedRequest, res, next) 
 // Restore document to a specific version
 documentRoutes.post("/:id/restore", async (req: AuthenticatedRequest, res, next) => {
   try {
-    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
-    if (!workspaceId) {
-      res.status(400).json({ message: "workspaceId is required" });
-      return;
-    }
-
+    let workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    
     const { versionNumber } = req.body as { versionNumber: number };
     if (typeof versionNumber !== "number" || versionNumber < 1) {
       res.status(400).json({ message: "versionNumber must be a positive integer" });
       return;
     }
 
-    const userId = requireUserId(req, res);
-    if (!userId) {
+    const userId = req.user?.id ?? "";
+    const shareToken = req.shareToken;
+    const access = await validateDocumentAccessWithShare(req.params.id, userId, shareToken);
+
+    if (!access.allowed) {
+      if (access.reason === "not_found") {
+        res.status(404).json({ message: "Document not found" });
+        return;
+      }
+      res.status(403).json({ message: "Access denied" });
       return;
     }
-    const role = await getDocumentRole(userId, req.params.id, workspaceId);
-    if (!canEditDocument(role)) {
+
+    if (!workspaceId && access.source === "share") {
+      workspaceId = access.workspaceId;
+    }
+
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    if (!canEditDocument(access.role)) {
       res.status(403).json({ message: "Access denied" });
       return;
     }

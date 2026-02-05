@@ -74,6 +74,8 @@ export const createDocumentVersion = async (
   createdBy: string,
   workspaceId: string
 ): Promise<DocumentVersion> => {
+  logger.info(`[DocumentVersion] 📜 Creating version for doc=${documentId}, user=${createdBy}`);
+  
   const client = await db.connect();
 
   try {
@@ -87,6 +89,8 @@ export const createDocumentVersion = async (
     `;
     const versionResult = await client.query(versionQuery, [documentId]);
     const nextVersionNumber = (versionResult.rows[0].max_version || 0) + 1;
+    
+    logger.debug(`[DocumentVersion] Next version number: ${nextVersionNumber}`);
 
     // Insert the new version
     const insertQuery = `
@@ -120,6 +124,7 @@ export const createDocumentVersion = async (
     ]);
 
     await client.query("COMMIT");
+    logger.info(`[DocumentVersion] ✅ Version ${nextVersionNumber} created for ${documentId}`);
     return result.rows[0];
   } catch (error) {
     await client.query("ROLLBACK");
@@ -138,6 +143,8 @@ export const restoreDocumentVersion = async (
   versionNumber: number,
   workspaceId: string
 ): Promise<Record<string, unknown>> => {
+  logger.info(`[DocumentVersion] 🔄 Restoring version ${versionNumber} for doc=${documentId}`);
+  
   const client = await db.connect();
 
   try {
@@ -146,6 +153,7 @@ export const restoreDocumentVersion = async (
     // Get the version to restore
     const version = await getDocumentVersion(documentId, versionNumber, workspaceId);
     if (!version) {
+      logger.error(`[DocumentVersion] ❌ Version ${versionNumber} not found for ${documentId}`);
       throw new Error("Version not found");
     }
 
@@ -169,6 +177,7 @@ export const restoreDocumentVersion = async (
     );
 
     await client.query("COMMIT");
+    logger.info(`[DocumentVersion] ✅ Version ${versionNumber} restored for ${documentId}`);
     return version.content;
   } catch (error) {
     await client.query("ROLLBACK");

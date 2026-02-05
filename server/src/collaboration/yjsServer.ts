@@ -25,11 +25,14 @@ class YjsDocumentManager {
    */
   getDocument(documentId: string): Y.Doc {
     if (!this.documents.has(documentId)) {
+      logger.info(`[YjsServer] 📄 Creating new Y.Doc for document: ${documentId}`);
       const doc = new Y.Doc();
       // Ensure the content fragment exists
       doc.getXmlFragment("content");
       doc.on("update", (update: Uint8Array, origin: unknown) => {
         const originWs = origin instanceof WebSocket ? origin : undefined;
+        const originType = origin instanceof WebSocket ? `WebSocket(${origin.readyState})` : typeof origin;
+        logger.debug(`[YjsServer] 🔄 Document update received for ${documentId}, origin: ${originType}`);
         this.broadcastUpdate(documentId, update, originWs);
       });
       this.documents.set(documentId, doc);
@@ -40,12 +43,15 @@ class YjsDocumentManager {
         if (changed.length === 0) {
           return;
         }
+        logger.debug(`[YjsServer] 👥 Awareness update for ${documentId}: added=${added.size}, updated=${updated.size}, removed=${removed.size}`);
         const update = awarenessProtocol.encodeAwarenessUpdate(awareness, changed);
         const originWs = origin instanceof WebSocket ? origin : undefined;
         this.broadcastAwareness(documentId, update, originWs);
       });
       this.awarenessStates.set(documentId, awareness);
-      logger.info(`Created new Y.Doc for document: ${documentId}`);
+      logger.info(`[YjsServer] ✅ Y.Doc created and initialized for ${documentId}`);
+    } else {
+      logger.debug(`[YjsServer] 📄 Using existing Y.Doc for ${documentId}`);
     }
     return this.documents.get(documentId)!;
   }
@@ -168,15 +174,19 @@ const yjsManager = new YjsDocumentManager();
  */
 export const createYjsServer = () => {
   return {
-    /**
-     * Attach a WebSocket connection to the YJS server
-     */
+  /**
+   * Attach a WebSocket connection to the YJS server
+   */
     attach: (ws: WebSocket, documentId: string, userId: string) => {
+      const timestamp = new Date().toISOString();
+      logger.info(`[YjsServer] 🔗 Client connecting: document=${documentId}, user=${userId}, time=${timestamp}`);
+      
       const doc = yjsManager.getDocument(documentId);
       const awareness = yjsManager.getAwareness(documentId);
       yjsManager.registerClient(ws, documentId, userId);
 
-      logger.info(`YJS client connected: document=${documentId}, user=${userId}`);
+      logger.info(`[YjsServer] 👤 Client registered: userId=${userId}, documentId=${documentId}`);
+      logger.info(`[YjsServer] 📊 Total clients for ${documentId}: ${yjsManager.getClientCount(documentId)}`);
 
       // Send initial document state (sync step 1)
       const encoder = encoding.createEncoder();
@@ -199,9 +209,11 @@ export const createYjsServer = () => {
 
       // Handle incoming messages
       ws.on("message", (data: WebSocket.RawData) => {
+        const msgTimestamp = new Date().toISOString();
         try {
           let payload: Uint8Array | null = null;
           if (typeof data === "string") {
+            logger.warn(`[YjsServer] ⚠️  Received string message, ignoring: ${data}`);
             return;
           }
           if (data instanceof ArrayBuffer) {
@@ -213,16 +225,19 @@ export const createYjsServer = () => {
           }
           const decoder = decoding.createDecoder(payload);
           const messageType = decoding.readVarUint(decoder);
+          logger.debug(`[YjsServer] 📨 Message received at ${msgTimestamp}: type=${messageType}, userId=${userId}, doc=${documentId}`);
 
           switch (messageType) {
             case messageSync: {
+              logger.debug(`[YjsServer] 🔄 Processing sync message for ${documentId} from ${userId}`);
               const encoder = encoding.createEncoder();
               encoding.writeVarUint(encoder, messageSync);
               syncProtocol.readSyncMessage(decoder, encoder, doc, ws, (error) => {
-                logger.error(`Error processing YJS sync message: ${error}`);
+                logger.error(`[YjsServer] ❌ Error processing YJS sync message: ${error}`);
               });
               if (encoding.length(encoder) > 1) {
                 ws.send(encoding.toUint8Array(encoder));
+                logger.debug(`[YjsServer] 📤 Sync response sent to ${userId} for ${documentId}`);
               }
               break;
             }
@@ -230,7 +245,10 @@ export const createYjsServer = () => {
             case messageAwareness: {
               const awarenessUpdate = decoding.readVarUint8Array(decoder);
               yjsManager.trackAwareness(ws, awarenessUpdate);
+              const beforeStates = awareness.getStates().size;
               awarenessProtocol.applyAwarenessUpdate(awareness, awarenessUpdate, ws);
+              const afterStates = awareness.getStates().size;
+              logger.debug(`[YjsServer] 👥 Awareness update applied for ${documentId}: states ${beforeStates} → ${afterStates}`);
               break;
             }
 
@@ -260,22 +278,23 @@ export const createYjsServer = () => {
             }
 
             default:
-              logger.warn(`Unknown YJS message type: ${messageType}`);
+              logger.warn(`[YjsServer] ⚠️  Unknown YJS message type: ${messageType} from ${userId}`);
           }
         } catch (error) {
-          logger.error(`Error processing YJS message: ${error}`);
+          logger.error(`[YjsServer] ❌ Error processing YJS message from ${userId} for ${documentId}:`, error);
         }
       });
 
       // Handle disconnect
       ws.on("close", () => {
-        logger.info(`YJS client disconnected: document=${documentId}, user=${userId}`);
+        const remainingClients = yjsManager.getClientCount(documentId);
+        logger.info(`[YjsServer] 🔌 Client disconnected: document=${documentId}, user=${userId}, remaining=${remainingClients}`);
         yjsManager.unregisterClient(ws);
       });
 
       // Handle errors
       ws.on("error", (error) => {
-        logger.error(`YJS WebSocket error: ${error}`);
+        logger.error(`[YjsServer] ❌ WebSocket error for ${userId} on ${documentId}:`, error);
       });
     },
 

@@ -56,7 +56,11 @@ class WebSocketYjsProvider implements YjsProvider {
   }
 
   connect(): void {
+    console.log(`[YjsProvider] 🔄 Connecting to document: ${this.documentId}`);
+    console.log(`[YjsProvider] User: ${this.userId} (${this.userName})`);
+    
     if (this.provider) {
+      console.log(`[YjsProvider] ⚠️  Provider already exists, skipping connection`);
       // Provider already exists, just connect
       return;
     }
@@ -72,6 +76,8 @@ class WebSocketYjsProvider implements YjsProvider {
     if (this.token) {
       url.searchParams.append('token', this.token);
     }
+    
+    console.log(`[YjsProvider] WebSocket URL: ${url.toString()}`);
 
     this.provider = new YWebsocketProvider(
       url.toString(),
@@ -82,6 +88,8 @@ class WebSocketYjsProvider implements YjsProvider {
         connect: true
       }
     );
+    
+    console.log(`[YjsProvider] ✅ Provider created, connecting...`);
 
     // Set local user state in awareness
     if (this.userId) {
@@ -94,15 +102,29 @@ class WebSocketYjsProvider implements YjsProvider {
 
     // Log connection status
     this.provider.on('status', (event: { status: "connected" | "disconnected" | "connecting" }) => {
-      console.log(`[YjsProvider] ${this.documentId} status: ${event.status}`);
+      const emoji = event.status === 'connected' ? '✅' : event.status === 'disconnected' ? '❌' : '🔄';
+      console.log(`[YjsProvider] ${emoji} Status: ${event.status.toUpperCase()} for ${this.documentId}`);
     });
 
     this.provider.on('sync', (synced: boolean) => {
-      console.log(`[YjsProvider] ${this.documentId} synced: ${synced}`);
+      const emoji = synced ? '✅' : '⏳';
+      console.log(`[YjsProvider] ${emoji} Sync ${synced ? 'completed' : 'in progress'} for ${this.documentId}`);
+      if (synced) {
+        console.log(`[YjsProvider] Document state:`, this.doc.getXmlFragment("content").toJSON());
+      }
     });
 
     this.provider.on('connection-error', (event: Event, provider: YWebsocketProvider) => {
-      console.error(`[YjsProvider] ${this.documentId} connection error:`, event);
+      console.error(`[YjsProvider] ❌ Connection error for ${this.documentId}:`, event);
+    });
+    
+    // Log awareness changes
+    this.awareness.on('change', () => {
+      const states = this.awareness.getStates();
+      console.log(`[YjsProvider] 👥 Awareness update: ${states.size} users present`);
+      states.forEach((state, clientID) => {
+        console.log(`[YjsProvider]   - Client ${clientID}:`, state);
+      });
     });
     
     // Set up change tracking for Y.js document
@@ -157,7 +179,10 @@ class WebSocketYjsProvider implements YjsProvider {
    * Set up change tracking for Y.js document
    */
   private setupChangeTracking(): void {
+    console.log(`[YjsProvider] 📝 Setting up change tracking for ${this.documentId}`);
+    
     if (!this.changeTracker) {
+      console.warn(`[YjsProvider] ⚠️  Change tracker not available for ${this.documentId}`);
       return;
     }
 
@@ -168,7 +193,16 @@ class WebSocketYjsProvider implements YjsProvider {
     let changeTimeout: number | null = null;
     
     contentFragment.observe((event) => {
+      const timestamp = new Date().toISOString();
+      console.log(`[YjsProvider] 📝 Document update detected at ${timestamp}`);
+      console.log(`[YjsProvider]   Changes:`, {
+        added: event.changes.added.size,
+        deleted: event.changes.deleted.size,
+        delta: event.changes.delta
+      });
+      
       if (!this.userId || changeTimeout) {
+        console.log(`[YjsProvider]   ⏭️  Skipping tracking (userId: ${!!this.userId}, pending: ${!!changeTimeout})`);
         return;
       }
       
@@ -186,6 +220,8 @@ class WebSocketYjsProvider implements YjsProvider {
         // Track the change event
         const changeType = this.determineChangeType(event);
         
+        console.log(`[YjsProvider] 💾 Tracking change: ${changeType} by ${this.userId}`);
+        
         void this.changeTracker.trackChange(
           changeType,
           {
@@ -199,6 +235,8 @@ class WebSocketYjsProvider implements YjsProvider {
         changeTimeout = null;
       }, 500);
     });
+    
+    console.log(`[YjsProvider] ✅ Change tracking active for ${this.documentId}`);
   }
   
   /**

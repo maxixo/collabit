@@ -25,6 +25,7 @@ import { SaveConfirmationModal } from "../components/SaveConfirmationModal";
 import { HistoryModal } from "../components/HistoryModal";
 import { resetProvider } from "../collaboration/yjsProvider";
 import { usePendingChanges } from "../hooks/usePendingChanges";
+import { registerDebugCommands } from "../utils/debug";
 
 const isTruthyParam = (value: string | null) => {
   if (value === null) {
@@ -544,6 +545,12 @@ export const Editor = () => {
       }));
     }
   }, [activeDocument, workspaceId, dispatch]);
+
+  // Register debug commands on mount
+  useEffect(() => {
+    registerDebugCommands();
+    console.log("🐛 Debug commands registered. Use window.debugCollab to access them.");
+  }, []);
 
   const editorContent = (activeDocument?.content as JSONContent) ?? emptyContent;
   const effectiveError = shareValidationError ?? error;

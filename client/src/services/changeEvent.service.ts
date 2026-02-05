@@ -39,7 +39,7 @@ export interface PendingChangesSummary {
 export const createChangeEvent = async (
   input: CreateChangeEventInput
 ): Promise<ChangeEvent> => {
-  const response = await fetch(`${API_BASE_URL}/change-events`, {
+  const response = await fetch(`${API_BASE_URL}/api/change-events`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -63,7 +63,7 @@ export const getPendingChanges = async (
   workspaceId: string
 ): Promise<PendingChangesSummary[]> => {
   const response = await fetch(
-    `${API_BASE_URL}/documents/${documentId}/pending-changes?workspaceId=${workspaceId}`,
+    `${API_BASE_URL}/api/documents/${documentId}/pending-changes?workspaceId=${workspaceId}`,
     {
       method: "GET",
       headers: {
@@ -93,7 +93,7 @@ export const saveDocument = async (
   }
 ): Promise<{ success: boolean; message: string; appliedChanges?: number }> => {
   const response = await fetch(
-    `${API_BASE_URL}/documents/${documentId}/save?workspaceId=${workspaceId}`,
+    `${API_BASE_URL}/api/documents/${documentId}/save?workspaceId=${workspaceId}`,
     {
       method: "POST",
       headers: {

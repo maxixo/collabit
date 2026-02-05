@@ -19,7 +19,7 @@ export const getDocumentHistory = async (
   workspaceId: string
 ): Promise<DocumentVersion[]> => {
   const response = await fetch(
-    `${API_BASE_URL}/documents/${documentId}/history?workspaceId=${workspaceId}`,
+    `${API_BASE_URL}/api/documents/${documentId}/history?workspaceId=${workspaceId}`,
     {
       method: "GET",
       headers: {
@@ -46,7 +46,7 @@ export const restoreDocumentVersion = async (
   workspaceId: string
 ): Promise<{ message: string; content: Record<string, unknown> }> => {
   const response = await fetch(
-    `${API_BASE_URL}/documents/${documentId}/restore?workspaceId=${workspaceId}`,
+    `${API_BASE_URL}/api/documents/${documentId}/restore?workspaceId=${workspaceId}`,
     {
       method: "POST",
       headers: {

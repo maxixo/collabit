@@ -1,10 +1,13 @@
 import { db } from "../config/db.js";
 import type { ChangeEvent, ChangeEventInput, PendingChangesSummary } from "../types/index.js";
+import { logger } from "../utils/logger.js";
 
 export const createChangeEvent = async (
   input: ChangeEventInput
 ): Promise<ChangeEvent> => {
   const { documentId, userId, changeType, content, position, workspaceId } = input;
+  
+  logger.info(`[ChangeEvent] 💾 Tracking change: type=${changeType}, doc=${documentId}, user=${userId}`);
   
   const result = await db.query(
     `INSERT INTO document_change_events 
@@ -14,7 +17,10 @@ export const createChangeEvent = async (
     [documentId, userId, changeType, JSON.stringify(content), position, workspaceId]
   );
   
-  return result.rows[0] as ChangeEvent;
+  const changeEvent = result.rows[0] as ChangeEvent;
+  logger.info(`[ChangeEvent] ✅ Change event created: id=${changeEvent.id}, type=${changeType}`);
+  
+  return changeEvent;
 };
 
 export const getPendingChanges = async (
