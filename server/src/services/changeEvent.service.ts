@@ -13,7 +13,16 @@ export const createChangeEvent = async (
     `INSERT INTO document_change_events 
        (document_id, user_id, change_type, content, position, workspace_id) 
        VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
+       RETURNING
+         id,
+         document_id as "documentId",
+         user_id as "userId",
+         change_type as "changeType",
+         content,
+         position,
+         created_at as "createdAt",
+         applied,
+         workspace_id as "workspaceId"`,
     [documentId, userId, changeType, JSON.stringify(content), position, workspaceId]
   );
   
@@ -29,17 +38,17 @@ export const getPendingChanges = async (
 ): Promise<PendingChangesSummary[]> => {
   const result = await db.query(
     `SELECT 
-       user_id,
-       COUNT(*) as change_count,
-       MIN(created_at) as first_change,
-       MAX(created_at) as last_change,
-       array_agg(change_type ORDER BY created_at DESC) as change_types
+       user_id as "userId",
+       COUNT(*)::int as "changeCount",
+       MIN(created_at) as "firstChange",
+       MAX(created_at) as "lastChange",
+       array_agg(change_type ORDER BY created_at DESC) as "changeTypes"
      FROM document_change_events
      WHERE document_id = $1 
        AND workspace_id = $2
        AND applied = FALSE
      GROUP BY user_id
-     ORDER BY last_change DESC`,
+     ORDER BY "lastChange" DESC`,
     [documentId, workspaceId]
   );
   
@@ -52,7 +61,17 @@ export const getDetailedPendingChanges = async (
   workspaceId: string
 ): Promise<ChangeEvent[]> => {
   const result = await db.query(
-    `SELECT * FROM document_change_events
+    `SELECT
+       id,
+       document_id as "documentId",
+       user_id as "userId",
+       change_type as "changeType",
+       content,
+       position,
+       created_at as "createdAt",
+       applied,
+       workspace_id as "workspaceId"
+     FROM document_change_events
      WHERE document_id = $1 
        AND user_id = $2
        AND workspace_id = $3
@@ -101,10 +120,11 @@ export const markAllChangesApplied = async (
 export const cleanupOldChanges = async (
   daysOld: number = 90
 ): Promise<number> => {
+  const safeDays = Number.isFinite(daysOld) ? Math.max(0, Math.trunc(daysOld)) : 90;
   const result = await db.query(
     `DELETE FROM document_change_events
-     WHERE created_at < NOW() - INTERVAL '${daysOld} days'`,
-    []
+     WHERE created_at < NOW() - ($1 * INTERVAL '1 day')`,
+    [safeDays]
   );
   
   return result.rowCount || 0;

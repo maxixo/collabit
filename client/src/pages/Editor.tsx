@@ -79,7 +79,7 @@ export const Editor = () => {
   const { toggleStar } = useStarToggle();
   
   // Document hooks
-  const { document, updateDocument, setLocalDocument, loading, error, saveStatus } = useDocument(
+  const { document, accessRole, updateDocument, setLocalDocument, loading, error, saveStatus } = useDocument(
     id,
     workspaceId,
     { shareToken: shareToken ?? undefined }
@@ -359,6 +359,8 @@ export const Editor = () => {
   const documentId = id ?? activeDocument?.id ?? null;
   const isStarred = Boolean(activeDocument?.isStarred);
   const canToggleStar = Boolean(activeDocument && documentId);
+  const isShareViewer = Boolean(shareToken && accessRole === "viewer");
+  const canSaveDocument = Boolean(documentId && workspaceId) && !isShareViewer;
   
   // Declare collaborationEnabled early since it's used in usePendingChanges hook
   const collaborationEnabled = Boolean(
@@ -555,7 +557,7 @@ export const Editor = () => {
   const editorContent = (activeDocument?.content as JSONContent) ?? emptyContent;
   const effectiveError = shareValidationError ?? error;
   const effectiveLoading = loading || isValidatingShare;
-  const isEditable = Boolean(activeDocument) && !effectiveLoading && !effectiveError && Boolean(workspaceId);
+  const isEditable = Boolean(activeDocument) && !effectiveLoading && !effectiveError && Boolean(workspaceId) && !isShareViewer;
   const searchActive = searchQuery.trim().length > 0;
 
   useEffect(() => {
@@ -886,18 +888,26 @@ export const Editor = () => {
               </div>
               <div className="h-6 w-px bg-[#e7e7f3] dark:bg-[#2d2e4a]"></div>
               <div className="flex items-center gap-2">
-                {hasPendingChanges && (
-                  <button
-                    className="flex h-9 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-bold text-white shadow-lg shadow-amber-500/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                    type="button"
-                    onClick={handleSave}
-                    disabled={isSavingDocument}
-                    title={`${totalPendingChanges} pending changes`}
-                  >
-                    <span className="material-symbols-outlined !text-[18px]">save</span>
-                    <span>{isSavingDocument ? "Saving..." : `Save (${totalPendingChanges})`}</span>
-                  </button>
-                )}
+                <button
+                  className={`flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-bold shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 ${
+                    hasPendingChanges
+                      ? "bg-amber-500 text-white shadow-amber-500/20"
+                      : "border border-[#e7e7f3] bg-white text-[#4c4d9a] shadow-[#dcdcf0]/40 dark:border-[#2d2e4a] dark:bg-[#1c1d3a] dark:text-[#8a8bbd]"
+                  }`}
+                  type="button"
+                  onClick={handleSave}
+                  disabled={isSavingDocument || !canSaveDocument}
+                  title={hasPendingChanges ? `${totalPendingChanges} pending changes` : "Save document"}
+                >
+                  <span className="material-symbols-outlined !text-[18px]">save</span>
+                  <span>
+                    {isSavingDocument
+                      ? "Saving..."
+                      : hasPendingChanges
+                        ? `Save (${totalPendingChanges})`
+                        : "Save"}
+                  </span>
+                </button>
                 <button
                   className="rounded-lg p-2 text-[#4c4d9a] transition-colors hover:bg-background-light dark:hover:bg-[#1c1d3a]"
                   type="button"
@@ -974,6 +984,13 @@ export const Editor = () => {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+          {!hasShareTokenError && isShareViewer && (
+            <div className="mx-auto mt-4 max-w-2xl rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-900/50 dark:bg-blue-950/30">
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                This link has viewer access. You can view live updates, but editing is disabled.
+              </p>
             </div>
           )}
 

@@ -8,6 +8,7 @@ export interface DocumentState {
   workspaceId: string;
   isStarred: boolean;
   content: TipTapContent;
+  accessRole?: "viewer" | "editor" | "owner";
 }
 
 export interface UserProfile {

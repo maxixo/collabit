@@ -18,7 +18,10 @@ export interface DocumentSummary {
 
 export interface DocumentDetail extends DocumentSummary {
   content: TipTapContent;
+  accessRole?: DocumentAccessRole;
 }
+
+export type DocumentAccessRole = "viewer" | "editor" | "owner";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 
@@ -178,11 +181,20 @@ export const fetchDocumentById = async (
       return null;
     }
 
-    const data = await parseJson<{ document: DocumentDetail }>(response);
-    if (data.document) {
-      await safeStore(() => saveDocument(data.document));
+    const data = await parseJson<{
+      document: DocumentDetail;
+      accessRole?: DocumentAccessRole;
+    }>(response);
+    const document = data.document
+      ? {
+          ...data.document,
+          accessRole: data.accessRole
+        }
+      : null;
+    if (document) {
+      await safeStore(() => saveDocument(document));
     }
-    return data.document ?? null;
+    return document;
   } catch (error) {
     if (!navigator.onLine) {
       return getCachedDocument(id);

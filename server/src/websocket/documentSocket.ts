@@ -3,6 +3,7 @@ import { ClientEvent, ServerEvent } from "@shared/events.js";
 import type { ServerSyncResponsePayload, ServerAccessDeniedPayload } from "@shared/types.js";
 import { logger } from "../utils/logger.js";
 import { getDocumentById } from "../services/document.service.js";
+import { getDocumentRole } from "../services/permission.service.js";
 import { createYjsServer } from "../collaboration/yjsServer.js";
 
 // Initialize YJS server instance
@@ -18,6 +19,36 @@ interface SocketMetadata {
   documentId?: string;
   workspaceId?: string;
 }
+
+const parseDocumentIdentity = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") {
+    return { documentId: "", workspaceId: "" };
+  }
+
+  const data = payload as { documentId?: unknown; workspaceId?: unknown };
+
+  return {
+    documentId: typeof data.documentId === "string" ? data.documentId.trim() : "",
+    workspaceId: typeof data.workspaceId === "string" ? data.workspaceId.trim() : ""
+  };
+};
+
+const sendAccessDenied = (
+  socket: WebSocket,
+  documentId: string,
+  workspaceId: string,
+  reason: string
+) => {
+  const errorPayload: ServerAccessDeniedPayload = {
+    documentId,
+    workspaceId,
+    reason
+  };
+  socket.send(JSON.stringify({
+    type: ServerEvent.AccessDenied,
+    payload: errorPayload
+  }));
+};
 
 /**
  * Register document sync handlers for a WebSocket connection
@@ -70,12 +101,39 @@ const handleDocumentOpen = async (
   socketMetadata: Map<WebSocket, SocketMetadata>
 ) => {
   try {
-    const { documentId, workspaceId } = payload as { documentId: string; workspaceId: string };
+    const { documentId, workspaceId } = parseDocumentIdentity(payload);
+
+    if (!documentId || !workspaceId) {
+      sendAccessDenied(socket, documentId, workspaceId, "documentId and workspaceId are required");
+      return;
+    }
+
+    if (!metadata.userId) {
+      sendAccessDenied(socket, documentId, workspaceId, "Unauthorized");
+      return;
+    }
+
+    const role = await getDocumentRole(metadata.userId, documentId, workspaceId);
+    if (!role) {
+      sendAccessDenied(socket, documentId, workspaceId, "Access denied");
+      return;
+    }
+
+    const document = await getDocumentById(documentId, workspaceId, metadata.userId, {
+      bypassAccessCheck: true
+    });
+    if (!document) {
+      sendAccessDenied(socket, documentId, workspaceId, "Document not found");
+      return;
+    }
 
     // Update metadata with document info
-    metadata.documentId = documentId;
-    metadata.workspaceId = workspaceId;
-    socketMetadata.set(socket, metadata);
+    const nextMetadata = {
+      ...metadata,
+      documentId,
+      workspaceId
+    };
+    socketMetadata.set(socket, nextMetadata);
 
     logger.info(`User ${metadata.userId} opened document ${documentId}`);
 
@@ -85,13 +143,13 @@ const handleDocumentOpen = async (
     // Send sync response with document data
     const response: ServerSyncResponsePayload = {
       document: {
-        id: documentId,
-        title: "Document", // TODO: Fetch actual title
-        updatedAt: new Date().toISOString(),
-        ownerId: "unknown",
-        workspaceId,
-        isStarred: false,
-        content: {} // TODO: Fetch actual content
+        id: document.id,
+        title: document.title,
+        updatedAt: document.updatedAt,
+        ownerId: document.ownerId,
+        workspaceId: document.workspaceId,
+        isStarred: document.isStarred,
+        content: document.content
       }
     };
 
@@ -102,15 +160,7 @@ const handleDocumentOpen = async (
 
   } catch (error) {
     logger.error(`Error handling document open: ${error}`);
-    const errorPayload: ServerAccessDeniedPayload = {
-      documentId: "",
-      workspaceId: "",
-      reason: "Failed to open document"
-    };
-    socket.send(JSON.stringify({
-      type: ServerEvent.AccessDenied,
-      payload: errorPayload
-    }));
+    sendAccessDenied(socket, "", "", "Failed to open document");
   }
 };
 
@@ -124,24 +174,38 @@ const handleSyncRequest = async (
   metadata: SocketMetadata
 ) => {
   try {
-    const { documentId, workspaceId } = payload as { documentId: string; workspaceId: string };
+    const parsed = parseDocumentIdentity(payload);
+    const documentId = parsed.documentId || metadata.documentId || "";
+    const workspaceId = parsed.workspaceId || metadata.workspaceId || "";
 
-    // Check if user has permission to access this document
-    // TODO: Implement proper permission check using permission.service.ts
+    if (!documentId || !workspaceId) {
+      sendAccessDenied(socket, documentId, workspaceId, "documentId and workspaceId are required");
+      return;
+    }
+
+    if (metadata.documentId && metadata.documentId !== documentId) {
+      sendAccessDenied(socket, documentId, workspaceId, "Document mismatch");
+      return;
+    }
+
+    if (metadata.workspaceId && metadata.workspaceId !== workspaceId) {
+      sendAccessDenied(socket, documentId, workspaceId, "Workspace mismatch");
+      return;
+    }
+
+    const role = await getDocumentRole(metadata.userId, documentId, workspaceId);
+    if (!role) {
+      sendAccessDenied(socket, documentId, workspaceId, "Access denied");
+      return;
+    }
 
     // Fetch document from database
-    const document = await getDocumentById(documentId, "", metadata.userId);
+    const document = await getDocumentById(documentId, workspaceId, metadata.userId, {
+      bypassAccessCheck: true
+    });
 
     if (!document) {
-      const errorPayload: ServerAccessDeniedPayload = {
-        documentId,
-        workspaceId,
-        reason: "Document not found or access denied"
-      };
-      socket.send(JSON.stringify({
-        type: ServerEvent.AccessDenied,
-        payload: errorPayload
-      }));
+      sendAccessDenied(socket, documentId, workspaceId, "Document not found");
       return;
     }
 
@@ -167,14 +231,6 @@ const handleSyncRequest = async (
 
   } catch (error) {
     logger.error(`Error handling sync request: ${error}`);
-    const errorPayload: ServerAccessDeniedPayload = {
-      documentId: "",
-      workspaceId: "",
-      reason: "Failed to sync document"
-    };
-    socket.send(JSON.stringify({
-      type: ServerEvent.AccessDenied,
-      payload: errorPayload
-    }));
+    sendAccessDenied(socket, "", "", "Failed to sync document");
   }
 };

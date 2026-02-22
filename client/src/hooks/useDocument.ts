@@ -21,6 +21,7 @@ export const useDocument = (
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [accessRole, setAccessRole] = useState<"viewer" | "editor" | "owner" | null>(null);
   const saveCounterRef = useRef(0);
   const pendingSaveRef = useRef(0);
   const currentDocumentIdRef = useRef<string | null>(null);
@@ -90,6 +91,7 @@ export const useDocument = (
 
     setSaveStatus("idle");
     setSaveError(null);
+    setAccessRole(null);
     saveCounterRef.current = 0;
     pendingSaveRef.current = 0;
     cancelPendingSave();
@@ -131,6 +133,7 @@ export const useDocument = (
             ...created,
             content: sanitizeTipTapContent(created.content) as DocumentState["content"]
           };
+          setAccessRole("owner");
           setDocument(nextDocument);
           void cacheDocument(nextDocument).catch(() => undefined);
           void indexDocument(nextDocument);
@@ -141,6 +144,7 @@ export const useDocument = (
           ...result,
           content: sanitizeTipTapContent(result.content) as DocumentState["content"]
         };
+        setAccessRole(result.accessRole ?? null);
         setDocument(nextDocument);
         void cacheDocument(nextDocument).catch(() => undefined);
         void indexDocument(nextDocument);
@@ -203,6 +207,7 @@ export const useDocument = (
 
   return {
     document,
+    accessRole,
     updateDocument: updateDocumentState,
     setLocalDocument,
     loading,

@@ -1,5 +1,6 @@
 import { db } from "../config/db.js";
 import { logger } from "../utils/logger.js";
+import type { PoolClient } from "pg";
 
 export interface DocumentVersion {
   id: string;
@@ -11,6 +12,61 @@ export interface DocumentVersion {
   createdAt: string;
   workspaceId: string;
 }
+
+type DbClient = Pick<PoolClient, "query">;
+
+const insertDocumentVersion = async (
+  client: DbClient,
+  documentId: string,
+  title: string,
+  content: Record<string, unknown>,
+  createdBy: string,
+  workspaceId: string
+): Promise<DocumentVersion> => {
+  // Get the next version number
+  const versionQuery = `
+    SELECT COALESCE(MAX(version_number), 0) as max_version
+    FROM document_versions
+    WHERE document_id = $1
+  `;
+  const versionResult = await client.query(versionQuery, [documentId]);
+  const nextVersionNumber = (versionResult.rows[0].max_version || 0) + 1;
+
+  logger.debug(`[DocumentVersion] Next version number: ${nextVersionNumber}`);
+
+  // Insert the new version
+  const insertQuery = `
+    INSERT INTO document_versions (
+      document_id,
+      version_number,
+      title,
+      content,
+      created_by,
+      workspace_id
+    )
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING 
+      id,
+      document_id as "documentId",
+      version_number as "versionNumber",
+      title,
+      content,
+      created_by as "createdBy",
+      created_at as "createdAt",
+      workspace_id as "workspaceId"
+  `;
+
+  const result = await client.query(insertQuery, [
+    documentId,
+    nextVersionNumber,
+    title,
+    JSON.stringify(content),
+    createdBy,
+    workspaceId
+  ]);
+
+  return result.rows[0];
+};
 
 /**
  * Get all versions of a document
@@ -44,7 +100,8 @@ export const getDocumentVersions = async (
 export const getDocumentVersion = async (
   documentId: string,
   versionNumber: number,
-  workspaceId: string
+  workspaceId: string,
+  client?: DbClient
 ): Promise<DocumentVersion | null> => {
   const query = `
     SELECT 
@@ -60,7 +117,8 @@ export const getDocumentVersion = async (
     WHERE document_id = $1 AND version_number = $2 AND workspace_id = $3
   `;
 
-  const result = await db.query(query, [documentId, versionNumber, workspaceId]);
+  const executor = client ?? db;
+  const result = await executor.query(query, [documentId, versionNumber, workspaceId]);
   return result.rows[0] || null;
 };
 
@@ -72,66 +130,38 @@ export const createDocumentVersion = async (
   title: string,
   content: Record<string, unknown>,
   createdBy: string,
-  workspaceId: string
+  workspaceId: string,
+  client?: PoolClient
 ): Promise<DocumentVersion> => {
   logger.info(`[DocumentVersion] 📜 Creating version for doc=${documentId}, user=${createdBy}`);
   
-  const client = await db.connect();
+  if (client) {
+    return insertDocumentVersion(client, documentId, title, content, createdBy, workspaceId);
+  }
+
+  const poolClient = await db.connect();
 
   try {
-    await client.query("BEGIN");
+    await poolClient.query("BEGIN");
 
-    // Get the next version number
-    const versionQuery = `
-      SELECT COALESCE(MAX(version_number), 0) as max_version
-      FROM document_versions
-      WHERE document_id = $1
-    `;
-    const versionResult = await client.query(versionQuery, [documentId]);
-    const nextVersionNumber = (versionResult.rows[0].max_version || 0) + 1;
-    
-    logger.debug(`[DocumentVersion] Next version number: ${nextVersionNumber}`);
-
-    // Insert the new version
-    const insertQuery = `
-      INSERT INTO document_versions (
-        document_id,
-        version_number,
-        title,
-        content,
-        created_by,
-        workspace_id
-      )
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING 
-        id,
-        document_id as "documentId",
-        version_number as "versionNumber",
-        title,
-        content,
-        created_by as "createdBy",
-        created_at as "createdAt",
-        workspace_id as "workspaceId"
-    `;
-
-    const result = await client.query(insertQuery, [
+    const version = await insertDocumentVersion(
+      poolClient,
       documentId,
-      nextVersionNumber,
       title,
-      JSON.stringify(content),
+      content,
       createdBy,
       workspaceId
-    ]);
+    );
 
-    await client.query("COMMIT");
-    logger.info(`[DocumentVersion] ✅ Version ${nextVersionNumber} created for ${documentId}`);
-    return result.rows[0];
+    await poolClient.query("COMMIT");
+    logger.info(`[DocumentVersion] ✅ Version ${version.versionNumber} created for ${documentId}`);
+    return version;
   } catch (error) {
-    await client.query("ROLLBACK");
+    await poolClient.query("ROLLBACK");
     logger.error("Failed to create document version", error);
     throw error;
   } finally {
-    client.release();
+    poolClient.release();
   }
 };
 
@@ -151,7 +181,7 @@ export const restoreDocumentVersion = async (
     await client.query("BEGIN");
 
     // Get the version to restore
-    const version = await getDocumentVersion(documentId, versionNumber, workspaceId);
+    const version = await getDocumentVersion(documentId, versionNumber, workspaceId, client);
     if (!version) {
       logger.error(`[DocumentVersion] ❌ Version ${versionNumber} not found for ${documentId}`);
       throw new Error("Version not found");
@@ -173,7 +203,8 @@ export const restoreDocumentVersion = async (
       version.title,
       version.content,
       "system", // System-generated version
-      workspaceId
+      workspaceId,
+      client
     );
 
     await client.query("COMMIT");
@@ -210,3 +241,4 @@ export const deleteOldVersions = async (
   const result = await db.query(query, [documentId, workspaceId, keepCount]);
   return result.rowCount || 0;
 };
+

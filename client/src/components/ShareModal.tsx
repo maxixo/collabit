@@ -36,7 +36,7 @@ const formatExpiration = (value: string | null) => {
 };
 
 export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }: ShareModalProps) => {
-  const [permission, setPermission] = useState<SharePermissionOption>("viewer");
+  const [permission, setPermission] = useState<SharePermissionOption>("editor");
   const [expirationOption, setExpirationOption] = useState<ExpirationOption>("never");
   const [customExpiration, setCustomExpiration] = useState("");
   const [maxUsesOption, setMaxUsesOption] = useState<MaxUsesOption>("unlimited");

@@ -50,7 +50,10 @@ export const getSessionUser = async (req: Request) => {
     return null;
   }
 
-  const payload = (await response.json()) as SessionPayload;
+  const payload = (await response.json()) as SessionPayload | null;
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
   const user = payload.user ?? payload.session?.user;
   const userId = user?.id ?? payload.session?.userId;
 

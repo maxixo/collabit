@@ -3,6 +3,7 @@ import { Router, type Response } from "express";
 import type { ShareTokenOptions } from "@shared/types.js";
 import type { DocumentModel } from "../models/document.model.js";
 import { authMiddleware, type AuthenticatedRequest } from "../middlewares/auth.middleware.js";
+import { logger } from "../utils/logger.js";
 import {
   autoJoinDocumentViaShare,
   createDocument,
@@ -34,7 +35,8 @@ import {
 } from "../services/shareToken.service.js";
 import {
   getDocumentVersions,
-  restoreDocumentVersion
+  restoreDocumentVersion,
+  createDocumentVersion
 } from "../services/documentVersion.service.js";
 
 export const documentRoutes = Router();
@@ -402,7 +404,11 @@ documentRoutes.get("/:id", async (req: AuthenticatedRequest, res, next) => {
       );
     }
 
-    res.json({ document });
+    res.json({
+      document,
+      accessRole: access.role,
+      accessSource: access.source
+    });
   } catch (error) {
     next(error);
   }
@@ -619,6 +625,8 @@ documentRoutes.get("/:id/history", async (req: AuthenticatedRequest, res, next) 
     const userId = req.user?.id ?? "";
     const shareToken = req.shareToken;
 
+    logger.info(`[History] Fetching history for document=${req.params.id}, workspace=${workspaceId}, user=${userId}`);
+
     const access = await validateDocumentAccessWithShare(req.params.id, userId, shareToken);
     if (!access.allowed) {
       if (access.reason === "not_found") {
@@ -638,9 +646,12 @@ documentRoutes.get("/:id/history", async (req: AuthenticatedRequest, res, next) 
       return;
     }
 
+    logger.info(`[History] Access granted, fetching versions for document=${req.params.id}, workspace=${workspaceId}`);
     const versions = await getDocumentVersions(req.params.id, workspaceId);
+    logger.info(`[History] Found ${versions.length} versions for document=${req.params.id}`);
     res.json({ versions });
   } catch (error) {
+    logger.error(`[History] Error fetching history for document=${req.params.id}:`, error);
     next(error);
   }
 });
@@ -738,6 +749,20 @@ documentRoutes.post("/:id/save", async (req: AuthenticatedRequest, res, next) =>
         appliedCount = await markAllChangesApplied(req.params.id, workspaceId);
       }
     }
+
+    const document = await getDocumentById(req.params.id, workspaceId, userId);
+    if (!document) {
+      res.status(404).json({ message: "Document not found" });
+      return;
+    }
+
+    await createDocumentVersion(
+      document.id,
+      document.title,
+      document.content,
+      userId,
+      workspaceId
+    );
 
     res.json({
       documentId: req.params.id,
