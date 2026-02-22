@@ -91,6 +91,14 @@ export const HistoryModal = ({
     }).format(date);
   };
 
+  const getEditorName = (version: DocumentVersion) => {
+    if (version.createdBy === "system") {
+      return "System";
+    }
+    const displayName = version.createdByName?.trim();
+    return displayName || version.createdBy;
+  };
+
   const getContentPreview = (content: Record<string, unknown>): string => {
     try {
       if (!content || typeof content !== "object") return "No content";
@@ -195,6 +203,9 @@ export const HistoryModal = ({
                             </span>
                           )}
                         </div>
+                        <p className="mb-1 text-xs text-[#4c4d9a] dark:text-[#8a8bbd]">
+                          Saved by {getEditorName(version)} at {formatDate(version.createdAt)}
+                        </p>
                         <p className="mb-2 text-sm font-medium text-[#0d0e1b] dark:text-white">
                           {version.title}
                         </p>

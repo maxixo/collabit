@@ -111,6 +111,7 @@ export const Editor = () => {
   
   // History Modal State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [contentResetVersion, setContentResetVersion] = useState(0);
   
   // Display helpers - declare these early since they're used in conditional checks
   const hasShareTokenError = Boolean(shareValidationError);
@@ -373,10 +374,11 @@ export const Editor = () => {
     isSaving: isSavingDocument,
     hasPendingChanges,
     totalPendingChanges,
-    saveDocument: saveDocumentWithChanges
+    versionSaveDocument
   } = usePendingChanges({
     documentId: documentId || "",
     workspaceId,
+    shareToken: shareToken ?? undefined,
     enabled: Boolean(documentId && workspaceId && collaborationEnabled)
   });
 
@@ -495,30 +497,44 @@ export const Editor = () => {
     if (hasPendingChanges) {
       setShowSaveModal(true);
     } else {
-      // Regular save without pending changes
-      saveDocumentWithChanges({ applyPendingChanges: true });
+      // Manual version save even when there are no pending collaborator changes.
+      void versionSaveDocument({
+        applyPendingChanges: true,
+        title: activeDocument?.title,
+        content: (activeDocument?.content as Record<string, unknown>) ?? undefined
+      }).catch((error) => {
+        console.error("Failed to save document version:", error);
+      });
     }
-  }, [hasPendingChanges, saveDocumentWithChanges]);
+  }, [hasPendingChanges, versionSaveDocument, activeDocument]);
 
   // Handle save confirmation - apply pending changes and save
   const handleApplySave = useCallback(async () => {
     try {
-      await saveDocumentWithChanges({ applyPendingChanges: true });
+      await versionSaveDocument({
+        applyPendingChanges: true,
+        title: activeDocument?.title,
+        content: (activeDocument?.content as Record<string, unknown>) ?? undefined
+      });
       setShowSaveModal(false);
     } catch (error) {
       console.error("Failed to save document:", error);
     }
-  }, [saveDocumentWithChanges]);
+  }, [versionSaveDocument, activeDocument]);
 
   // Handle save without applying pending changes
   const handleSaveOnly = useCallback(async () => {
     try {
-      await saveDocumentWithChanges({ applyPendingChanges: false });
+      await versionSaveDocument({
+        applyPendingChanges: false,
+        title: activeDocument?.title,
+        content: (activeDocument?.content as Record<string, unknown>) ?? undefined
+      });
       setShowSaveModal(false);
     } catch (error) {
       console.error("Failed to save document:", error);
     }
-  }, [saveDocumentWithChanges]);
+  }, [versionSaveDocument, activeDocument]);
 
   // Handle history restore
   const handleHistoryRestore = useCallback((content: JSONContent) => {
@@ -534,6 +550,7 @@ export const Editor = () => {
 
     documentRef.current = nextDocument;
     updateDocumentRef.current(nextDocument);
+    setContentResetVersion((current) => current + 1);
     
     // Update in recent documents list
     if (activeDocument.id) {
@@ -891,21 +908,21 @@ export const Editor = () => {
                 <button
                   className={`flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-bold shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 ${
                     hasPendingChanges
-                      ? "bg-amber-500 text-white shadow-amber-500/20"
-                      : "border border-[#e7e7f3] bg-white text-[#4c4d9a] shadow-[#dcdcf0]/40 dark:border-[#2d2e4a] dark:bg-[#1c1d3a] dark:text-[#8a8bbd]"
+                      ? "bg-emerald-600 text-white shadow-emerald-600/20"
+                      : "border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-emerald-200/40 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300"
                   }`}
                   type="button"
                   onClick={handleSave}
                   disabled={isSavingDocument || !canSaveDocument}
-                  title={hasPendingChanges ? `${totalPendingChanges} pending changes` : "Save document"}
+                  title={hasPendingChanges ? `${totalPendingChanges} pending changes to include in version` : "Create version snapshot"}
                 >
-                  <span className="material-symbols-outlined !text-[18px]">save</span>
+                  <span className="material-symbols-outlined !text-[18px]">bookmarks</span>
                   <span>
                     {isSavingDocument
-                      ? "Saving..."
+                      ? "Saving Version..."
                       : hasPendingChanges
-                        ? `Save (${totalPendingChanges})`
-                        : "Save"}
+                        ? `Version Save (${totalPendingChanges})`
+                        : "Version Save"}
                   </span>
                 </button>
                 <button
@@ -999,6 +1016,7 @@ export const Editor = () => {
               key={documentId || "no-doc"}
               documentId={documentId}
               content={editorContent}
+              contentVersion={contentResetVersion}
               editable={isEditable}
               onChange={handleContentChange}
               onTitleChange={handleTitleChange}
@@ -1029,9 +1047,10 @@ export const Editor = () => {
                 className={`flex items-center gap-1 transition-colors hover:opacity-80 ${displaySaveStatus === "conflict" ? "cursor-pointer hover:underline" : ""}`}
                 onClick={displaySaveStatus === "conflict" ? () => setShowConflictModal(true) : undefined}
                 type={displaySaveStatus === "conflict" ? "button" : undefined}
+                title="Autosave status"
               >
                 <span className={`material-symbols-outlined !text-xs ${saveClass}`}>{saveIcon}</span>
-                {saveLabel}
+                Autosave: {saveLabel}
               </button>
             </div>
           </footer>

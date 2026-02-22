@@ -51,6 +51,7 @@ const mergeStats = (first: EditorStats, second: EditorStats): EditorStats => ({
 type EditorSurfaceProps = {
   documentId?: string | null;
   content: JSONContent;
+  contentVersion?: number;
   editable: boolean;
   onChange: (content: JSONContent) => void;
   docTitle: string;
@@ -69,6 +70,7 @@ type EditorSurfaceProps = {
 export const EditorSurface = ({
   documentId,
   content,
+  contentVersion = 0,
   editable,
   onChange,
   onTitleChange,
@@ -277,7 +279,7 @@ export const EditorSurface = ({
       return;
     }
 
-    const hydrationKey = documentId ?? "local";
+    const hydrationKey = `${documentId ?? "local"}:${contentVersion}`;
     if (lastHydratedKey.current === hydrationKey) {
       return;
     }
@@ -287,7 +289,7 @@ export const EditorSurface = ({
     safeEditor.commands.focus("end");
     lastHydratedKey.current = hydrationKey;
     updateStats(safeEditor);
-  }, [safeEditor, content, documentId, updateStats]);
+  }, [safeEditor, content, documentId, contentVersion, updateStats]);
 
   useEffect(() => {
     if (!safeEditor) {

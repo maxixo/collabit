@@ -715,25 +715,43 @@ documentRoutes.post("/:id/restore", async (req: AuthenticatedRequest, res, next)
 // Save document with optional change application
 documentRoutes.post("/:id/save", async (req: AuthenticatedRequest, res, next) => {
   try {
-    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    let workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const userId = req.user?.id ?? "";
+    if (!userId) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    const shareToken = req.shareToken;
+    const access = await validateDocumentAccessWithShare(req.params.id, userId, shareToken);
+    if (!access.allowed) {
+      if (access.reason === "not_found") {
+        res.status(404).json({ message: "Document not found" });
+        return;
+      }
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    if (!workspaceId && access.source === "share") {
+      workspaceId = access.workspaceId;
+    }
+
     if (!workspaceId) {
       res.status(400).json({ message: "workspaceId is required" });
       return;
     }
 
-    const userId = requireUserId(req, res);
-    if (!userId) {
-      return;
-    }
-    const role = await getDocumentRole(userId, req.params.id, workspaceId);
-    if (!canEditDocument(role)) {
+    if (!canEditDocument(access.role)) {
       res.status(403).json({ message: "Access denied" });
       return;
     }
 
-    const { applyPendingChanges, specificUserChanges } = req.body as {
+    const { applyPendingChanges, specificUserChanges, title, content } = req.body as {
       applyPendingChanges?: boolean;
       specificUserChanges?: string[];
+      title?: string;
+      content?: Record<string, unknown>;
     };
 
     let appliedCount = 0;
@@ -750,16 +768,40 @@ documentRoutes.post("/:id/save", async (req: AuthenticatedRequest, res, next) =>
       }
     }
 
-    const document = await getDocumentById(req.params.id, workspaceId, userId);
-    if (!document) {
+    let versionSourceDocument = await getDocumentById(req.params.id, workspaceId, userId);
+    if (!versionSourceDocument) {
       res.status(404).json({ message: "Document not found" });
       return;
     }
 
-    await createDocumentVersion(
-      document.id,
-      document.title,
-      document.content,
+    if (typeof title !== "undefined" || typeof content !== "undefined") {
+      const updated = await updateDocument({
+        id: req.params.id,
+        workspaceId,
+        title: title?.trim(),
+        content
+      });
+
+      if (!updated) {
+        res.status(404).json({ message: "Document not found" });
+        return;
+      }
+      versionSourceDocument = updated;
+    }
+
+    if (access.source === "share" && access.shareToken && userId) {
+      await autoJoinDocumentViaShare(
+        req.params.id,
+        userId,
+        access.shareToken.token,
+        access.shareToken.permissionLevel
+      );
+    }
+
+    const version = await createDocumentVersion(
+      versionSourceDocument.id,
+      versionSourceDocument.title,
+      versionSourceDocument.content,
       userId,
       workspaceId
     );
@@ -767,8 +809,11 @@ documentRoutes.post("/:id/save", async (req: AuthenticatedRequest, res, next) =>
     res.json({
       documentId: req.params.id,
       saved: true,
+      versionNumber: version.versionNumber,
+      versionCreatedAt: version.createdAt,
+      versionCreatedBy: version.createdBy,
       appliedChanges: appliedCount,
-      message: `Document saved${appliedCount > 0 ? ` with ${appliedCount} pending changes applied` : ""}`
+      message: `Version saved${appliedCount > 0 ? ` with ${appliedCount} pending changes applied` : ""}`
     });
   } catch (error) {
     next(error);

@@ -1,6 +1,7 @@
 import { db } from "../config/db.js";
 import { logger } from "../utils/logger.js";
 import type { PoolClient } from "pg";
+import { getUserSchemaInfo, type UserSchemaInfo } from "./userSchema.service.js";
 
 export interface DocumentVersion {
   id: string;
@@ -9,11 +10,60 @@ export interface DocumentVersion {
   title: string;
   content: Record<string, unknown>;
   createdBy: string;
+  createdByName?: string;
   createdAt: string;
   workspaceId: string;
 }
 
 type DbClient = Pick<PoolClient, "query">;
+
+const quoteIdentifier = (value: string) => `"${value.replace(/"/g, "\"\"")}"`;
+
+const resolveUserIdColumn = (schema: UserSchemaInfo) => {
+  if (schema.columns.has("id")) {
+    return "id";
+  }
+  if (schema.columns.has("user_id")) {
+    return "user_id";
+  }
+  return "";
+};
+
+const buildUserJoinQueryParts = async () => {
+  try {
+    const schema = await getUserSchemaInfo();
+    const userIdColumn = resolveUserIdColumn(schema);
+    if (!userIdColumn) {
+      return {
+        joinClause: "",
+        createdByNameSelect: "dv.created_by as \"createdByName\""
+      };
+    }
+
+    const nameCandidates = ["display_name", "displayName", "name", "full_name"];
+    const displayNameExpressions: string[] = [];
+
+    for (const candidate of nameCandidates) {
+      if (schema.columns.has(candidate)) {
+        displayNameExpressions.push(`NULLIF(TRIM(u.${quoteIdentifier(candidate)}::text), '')`);
+      }
+    }
+
+    if (schema.columns.has("email")) {
+      displayNameExpressions.push(`NULLIF(split_part(u.${quoteIdentifier("email")}::text, '@', 1), '')`);
+    }
+
+    return {
+      joinClause: `LEFT JOIN ${schema.tableIdentifier} u ON u.${quoteIdentifier(userIdColumn)}::text = dv.created_by`,
+      createdByNameSelect: `COALESCE(${displayNameExpressions.join(", ") || "NULL"}, dv.created_by) as "createdByName"`
+    };
+  } catch {
+    return {
+      joinClause: "",
+      createdByNameSelect: "dv.created_by as \"createdByName\""
+    };
+  }
+};
 
 const insertDocumentVersion = async (
   client: DbClient,
@@ -75,19 +125,23 @@ export const getDocumentVersions = async (
   documentId: string,
   workspaceId: string
 ): Promise<DocumentVersion[]> => {
+  const { joinClause, createdByNameSelect } = await buildUserJoinQueryParts();
+
   const query = `
     SELECT 
-      id,
-      document_id as "documentId",
-      version_number as "versionNumber",
-      title,
-      content,
-      created_by as "createdBy",
-      created_at as "createdAt",
-      workspace_id as "workspaceId"
-    FROM document_versions
-    WHERE document_id = $1 AND workspace_id = $2
-    ORDER BY version_number DESC
+      dv.id,
+      dv.document_id as "documentId",
+      dv.version_number as "versionNumber",
+      dv.title,
+      dv.content,
+      dv.created_by as "createdBy",
+      ${createdByNameSelect},
+      dv.created_at as "createdAt",
+      dv.workspace_id as "workspaceId"
+    FROM document_versions dv
+    ${joinClause}
+    WHERE dv.document_id = $1 AND dv.workspace_id = $2
+    ORDER BY dv.version_number DESC
   `;
 
   const result = await db.query(query, [documentId, workspaceId]);

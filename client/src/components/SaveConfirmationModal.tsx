@@ -122,16 +122,16 @@ export const SaveConfirmationModal = ({
         <div className="flex items-center justify-between border-b border-[#e7e7f3] bg-[#f8f8fc] px-6 py-4 dark:border-[#2a2b4a] dark:bg-[#1e1f3a]">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-              <span className="material-symbols-outlined">save</span>
+              <span className="material-symbols-outlined">bookmarks</span>
             </div>
             <div>
               <h2 className="text-lg font-bold text-[#0d0e1b] dark:text-white">
-                Save Document
+                Version Save
               </h2>
               <p className="text-sm text-[#4c4d9a] dark:text-[#a1a1c9]">
                 {pendingChanges.length > 0
                   ? `${totalChanges} pending ${totalChanges === 1 ? "change" : "changes"}`
-                  : "Ready to save"}
+                  : "Ready to create a version snapshot"}
               </p>
             </div>
           </div>
@@ -236,7 +236,7 @@ export const SaveConfirmationModal = ({
               type="button"
               disabled={isSaving}
             >
-              Save Only My Changes
+              Version Save My Changes
             </button>
           )}
 
@@ -246,16 +246,16 @@ export const SaveConfirmationModal = ({
             type="button"
             disabled={isSaving || (pendingChanges.length > 0 && selectedCount === 0)}
           >
-            <span className="material-symbols-outlined text-base">save</span>
+            <span className="material-symbols-outlined text-base">bookmarks</span>
             {isSaving ? (
               <span className="flex items-center gap-2">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                Saving...
+                Saving version...
               </span>
             ) : pendingChanges.length > 0 ? (
-              `Apply & Save ${selectedCount > 0 ? `(${selectedCount})` : ""}`
+              `Apply & Version Save ${selectedCount > 0 ? `(${selectedCount})` : ""}`
             ) : (
-              "Save Document"
+              "Create Version Snapshot"
             )}
           </button>
         </div>

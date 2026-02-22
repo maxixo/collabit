@@ -7,6 +7,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000
 interface UsePendingChangesOptions {
   documentId: string;
   workspaceId: string;
+  shareToken?: string;
   enabled?: boolean;
   pollInterval?: number;
 }
@@ -29,11 +30,15 @@ interface PendingChangesResponse {
 interface SaveDocumentOptions {
   applyPendingChanges: boolean;
   specificUserChanges?: string[];
+  title?: string;
+  content?: Record<string, unknown>;
+  saveType?: "version";
 }
 
 export const usePendingChanges = ({
   documentId,
   workspaceId,
+  shareToken,
   enabled = true,
   pollInterval = 30000 // 30 seconds by default
 }: UsePendingChangesOptions) => {
@@ -42,6 +47,21 @@ export const usePendingChanges = ({
   const [isSaving, setIsSaving] = useState(false);
   const { pendingChanges, dispatch } = useAppStore();
   const { user: currentUser } = useAuth();
+
+  const buildDocumentUrl = useCallback(
+    (path: "pending-changes" | "save") => {
+      const params = new URLSearchParams();
+      if (workspaceId) {
+        params.set("workspaceId", workspaceId);
+      }
+      if (shareToken) {
+        params.set("token", shareToken);
+      }
+      const query = params.toString();
+      return `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/${path}${query ? `?${query}` : ""}`;
+    },
+    [documentId, workspaceId, shareToken]
+  );
 
   // Fetch pending changes from the server
   const fetchPendingChanges = useCallback(async () => {
@@ -53,16 +73,13 @@ export const usePendingChanges = ({
       setLoading(true);
       setError(null);
 
-      const response = await fetch(
-        `${API_BASE_URL}/api/documents/${documentId}/pending-changes?workspaceId=${workspaceId}`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("auth_token")}`
-          }
+      const response = await fetch(buildDocumentUrl("pending-changes"), {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json"
         }
-      );
+      });
 
       if (!response.ok) {
         throw new Error(`Failed to fetch pending changes: ${response.statusText}`);
@@ -77,10 +94,10 @@ export const usePendingChanges = ({
     } finally {
       setLoading(false);
     }
-  }, [documentId, workspaceId, enabled, currentUser, dispatch]);
+  }, [buildDocumentUrl, enabled, currentUser, dispatch]);
 
-  // Save document with optional change application
-  const saveDocument = useCallback(
+  // Manually save an explicit version snapshot for history.
+  const versionSaveDocument = useCallback(
     async (options: SaveDocumentOptions = { applyPendingChanges: true }) => {
       if (!documentId || !workspaceId || !currentUser) {
         throw new Error("Missing required parameters");
@@ -91,17 +108,17 @@ export const usePendingChanges = ({
         setError(null);
         dispatch(actions.setSaveStatus("saving"));
 
-        const response = await fetch(
-          `${API_BASE_URL}/api/documents/${documentId}/save?workspaceId=${workspaceId}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${localStorage.getItem("auth_token")}`
-            },
-            body: JSON.stringify(options)
-          }
-        );
+        const response = await fetch(buildDocumentUrl("save"), {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            ...options,
+            saveType: "version"
+          })
+        });
 
         if (!response.ok) {
           throw new Error(`Failed to save document: ${response.statusText}`);
@@ -122,7 +139,7 @@ export const usePendingChanges = ({
         setIsSaving(false);
       }
     },
-    [documentId, workspaceId, currentUser, dispatch]
+    [buildDocumentUrl, documentId, workspaceId, currentUser, dispatch]
   );
 
   // Clear pending changes state (e.g., after save)
@@ -161,7 +178,8 @@ export const usePendingChanges = ({
       0
     ),
     fetchPendingChanges,
-    saveDocument,
+    saveDocument: versionSaveDocument,
+    versionSaveDocument,
     clearPendingChanges
   };
 };

@@ -7,6 +7,7 @@ export interface DocumentVersion {
   title: string;
   content: Record<string, unknown>;
   createdBy: string;
+  createdByName?: string;
   createdAt: string;
   workspaceId: string;
 }
