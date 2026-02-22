@@ -31,14 +31,24 @@ const buildAuthRequest = (
   });
 };
 
+const getSetCookieHeaders = (response: Response): string[] => {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof headers.getSetCookie === "function") {
+    return headers.getSetCookie();
+  }
+
+  const raw = response.headers.get("set-cookie");
+  return raw ? [raw] : [];
+};
+
 const sendAuthResponse = async (res: ExpressResponse, response: Response) => {
+  const setCookieHeaders = getSetCookieHeaders(response);
   response.headers.forEach((value, key) => {
-    if (key.toLowerCase() === "set-cookie") {
-      res.append("set-cookie", value);
-    } else {
+    if (key.toLowerCase() !== "set-cookie") {
       res.setHeader(key, value);
     }
   });
+  setCookieHeaders.forEach((cookie) => res.append("set-cookie", cookie));
 
   res.status(response.status);
   const text = await response.text();
