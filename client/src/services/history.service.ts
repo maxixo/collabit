@@ -11,30 +11,60 @@ export interface DocumentVersion {
   workspaceId: string;
 }
 
+type HistoryRequestOptions = {
+  shareToken?: string;
+};
+
+const buildHistoryUrl = (
+  documentId: string,
+  path: "history" | "restore",
+  workspaceId: string,
+  options?: HistoryRequestOptions
+) => {
+  const params = new URLSearchParams();
+  if (workspaceId) {
+    params.set("workspaceId", workspaceId);
+  }
+  if (options?.shareToken) {
+    params.set("token", options.shareToken);
+  }
+
+  const query = params.toString();
+  return `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/${path}${query ? `?${query}` : ""}`;
+};
+
+const getErrorMessage = async (response: Response, fallback: string) => {
+  try {
+    const data = (await response.json()) as { message?: string };
+    return data.message ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 /**
  * Fetch document history/versions
  */
 export const getDocumentHistory = async (
   documentId: string,
-  workspaceId: string
+  workspaceId: string,
+  options?: HistoryRequestOptions
 ): Promise<DocumentVersion[]> => {
-  const response = await fetch(
-    `${API_BASE_URL}/api/documents/${documentId}/history?workspaceId=${workspaceId}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("auth_token")}`
-      }
+  const response = await fetch(buildHistoryUrl(documentId, "history", workspaceId, options), {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json"
     }
-  );
+  });
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch document history: ${response.statusText}`);
+    const message = await getErrorMessage(response, response.statusText || "Request failed");
+    throw new Error(`Failed to fetch document history: ${message}`);
   }
 
-  const data = await response.json();
-  return data.versions;
+  const data = (await response.json()) as { versions?: DocumentVersion[] };
+  return data.versions ?? [];
 };
 
 /**
@@ -43,22 +73,21 @@ export const getDocumentHistory = async (
 export const restoreDocumentVersion = async (
   documentId: string,
   versionNumber: number,
-  workspaceId: string
+  workspaceId: string,
+  options?: HistoryRequestOptions
 ): Promise<{ message: string; content: Record<string, unknown> }> => {
-  const response = await fetch(
-    `${API_BASE_URL}/api/documents/${documentId}/restore?workspaceId=${workspaceId}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("auth_token")}`
-      },
-      body: JSON.stringify({ versionNumber })
-    }
-  );
+  const response = await fetch(buildHistoryUrl(documentId, "restore", workspaceId, options), {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ versionNumber })
+  });
 
   if (!response.ok) {
-    throw new Error(`Failed to restore document: ${response.statusText}`);
+    const message = await getErrorMessage(response, response.statusText || "Request failed");
+    throw new Error(`Failed to restore document: ${message}`);
   }
 
   return response.json();

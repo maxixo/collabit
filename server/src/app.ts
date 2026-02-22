@@ -19,6 +19,14 @@ export const createApp = () => {
   );
   app.use(express.json());
 
+  app.get("/", (_req, res) => {
+    res.json({
+      service: "collab-api",
+      status: "ok",
+      health: "/health"
+    });
+  });
+
   app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
   });

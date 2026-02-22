@@ -1078,6 +1078,7 @@ export const Editor = () => {
           onClose={() => setShowHistoryModal(false)}
           documentId={documentId}
           workspaceId={workspaceId}
+          shareToken={shareToken}
           documentTitle={displayTitle}
           onRestore={handleHistoryRestore}
         />

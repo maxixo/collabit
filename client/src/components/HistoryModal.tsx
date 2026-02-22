@@ -8,6 +8,7 @@ interface HistoryModalProps {
   onClose: () => void;
   documentId: string;
   workspaceId: string;
+  shareToken?: string | null;
   documentTitle: string;
   onRestore: (content: JSONContent) => void;
 }
@@ -17,6 +18,7 @@ export const HistoryModal = ({
   onClose,
   documentId,
   workspaceId,
+  shareToken,
   documentTitle,
   onRestore
 }: HistoryModalProps) => {
@@ -31,14 +33,16 @@ export const HistoryModal = ({
     if (isOpen && documentId && workspaceId) {
       loadHistory();
     }
-  }, [isOpen, documentId, workspaceId]);
+  }, [isOpen, documentId, workspaceId, shareToken]);
 
   const loadHistory = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const data = await getDocumentHistory(documentId, workspaceId);
+      const data = await getDocumentHistory(documentId, workspaceId, {
+        shareToken: shareToken ?? undefined
+      });
       setVersions(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load history");
@@ -59,7 +63,12 @@ export const HistoryModal = ({
     setError(null);
 
     try {
-      const result = await restoreDocumentVersion(documentId, selectedVersion.versionNumber, workspaceId);
+      const result = await restoreDocumentVersion(
+        documentId,
+        selectedVersion.versionNumber,
+        workspaceId,
+        { shareToken: shareToken ?? undefined }
+      );
       onRestore(result.content as JSONContent);
       setShowRestoreConfirm(false);
       setSelectedVersion(null);
