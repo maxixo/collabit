@@ -26,6 +26,7 @@ import { HistoryModal } from "../components/HistoryModal";
 import { resetProvider } from "../collaboration/yjsProvider";
 import { usePendingChanges } from "../hooks/usePendingChanges";
 import { registerDebugCommands } from "../utils/debug";
+import { exportDocumentAsDoc, exportDocumentAsPdf } from "../utils/exportDocument";
 
 const isTruthyParam = (value: string | null) => {
   if (value === null) {
@@ -97,6 +98,10 @@ export const Editor = () => {
   const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "local" | "remote">("idle");
   const [shareValidationError, setShareValidationError] = useState<string | null>(null);
   const [isValidatingShare, setIsValidatingShare] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isExportingFormat, setIsExportingFormat] = useState<"pdf" | "doc" | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
   
   // Conflict Modal State
   const [showConflictModal, setShowConflictModal] = useState(false);
@@ -362,6 +367,7 @@ export const Editor = () => {
   const canToggleStar = Boolean(activeDocument && documentId);
   const isShareViewer = Boolean(shareToken && accessRole === "viewer");
   const canSaveDocument = Boolean(documentId && workspaceId) && !isShareViewer;
+  const canExportDocument = Boolean(activeDocument && documentId && workspaceId);
   
   // Declare collaborationEnabled early since it's used in usePendingChanges hook
   const collaborationEnabled = Boolean(
@@ -426,6 +432,37 @@ export const Editor = () => {
       return { ...previous, [documentId]: true };
     });
   }, [documentId, workspaceId]);
+
+  const handleExportAction = useCallback(
+    (format: "pdf" | "doc") => {
+      if (!activeDocument || !canExportDocument) {
+        return;
+      }
+
+      setExportError(null);
+      setShowExportMenu(false);
+      setIsExportingFormat(format);
+
+      try {
+        const payload = {
+          title: displayTitle,
+          content: activeDocument.content as JSONContent,
+          updatedAt: activeDocument.updatedAt
+        };
+
+        if (format === "pdf") {
+          exportDocumentAsPdf(payload);
+        } else {
+          exportDocumentAsDoc(payload);
+        }
+      } catch (error) {
+        setExportError(error instanceof Error ? error.message : "Failed to export document");
+      } finally {
+        setIsExportingFormat(null);
+      }
+    },
+    [activeDocument, canExportDocument, displayTitle]
+  );
 
   // Conflict resolution handlers
   const handleKeepLocal = useCallback(() => {
@@ -593,6 +630,8 @@ export const Editor = () => {
     setShowConflictModal(false);
     setLocalVersion(EMPTY_TIPTAP_DOC);
     setServerVersion(EMPTY_TIPTAP_DOC);
+    setShowExportMenu(false);
+    setExportError(null);
   }, [documentId]);
 
   useEffect(() => {
@@ -606,6 +645,32 @@ export const Editor = () => {
       applyLocalStarUpdate(update.isStarred);
     });
   }, [documentId, workspaceId, applyLocalStarUpdate]);
+
+  useEffect(() => {
+    if (!showExportMenu) {
+      return;
+    }
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (exportMenuRef.current && target && !exportMenuRef.current.contains(target)) {
+        setShowExportMenu(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowExportMenu(false);
+      }
+    };
+
+    window.addEventListener("mousedown", handleOutsideClick);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("mousedown", handleOutsideClick);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [showExportMenu]);
 
   // WebSocket and collaboration state
   const wsManagerRef = useRef<WebSocketManager | null>(null);
@@ -934,6 +999,49 @@ export const Editor = () => {
                 >
                   <span className="material-symbols-outlined">history</span>
                 </button>
+                <div className="relative" ref={exportMenuRef}>
+                  <button
+                    className="flex h-9 items-center gap-1.5 rounded-lg border border-[#e7e7f3] bg-white px-3 text-sm font-semibold text-[#4c4d9a] transition-colors hover:bg-background-light disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#2d2e4a] dark:bg-[#16172d] dark:text-[#8a8bbd] dark:hover:bg-[#1c1d3a]"
+                    type="button"
+                    onClick={() => setShowExportMenu((current) => !current)}
+                    disabled={!canExportDocument || Boolean(isExportingFormat)}
+                    title="Export document"
+                    aria-haspopup="menu"
+                    aria-expanded={showExportMenu}
+                  >
+                    <span className="material-symbols-outlined !text-[18px]">download</span>
+                    <span>{isExportingFormat ? "Exporting..." : "Export"}</span>
+                    <span className="material-symbols-outlined !text-[18px]">expand_more</span>
+                  </button>
+                  {showExportMenu && (
+                    <div
+                      className="absolute right-0 top-11 z-30 w-52 rounded-lg border border-[#e7e7f3] bg-white p-1.5 shadow-xl dark:border-[#2d2e4a] dark:bg-[#16172d]"
+                      role="menu"
+                      aria-label="Export options"
+                    >
+                      <button
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-[#0d0e1b] transition-colors hover:bg-[#f3f4ff] disabled:cursor-not-allowed disabled:opacity-60 dark:text-white dark:hover:bg-[#1c1d3a]"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => handleExportAction("pdf")}
+                        disabled={Boolean(isExportingFormat)}
+                      >
+                        <span className="material-symbols-outlined !text-[18px] text-red-500">picture_as_pdf</span>
+                        <span>Export as PDF</span>
+                      </button>
+                      <button
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-[#0d0e1b] transition-colors hover:bg-[#f3f4ff] disabled:cursor-not-allowed disabled:opacity-60 dark:text-white dark:hover:bg-[#1c1d3a]"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => handleExportAction("doc")}
+                        disabled={Boolean(isExportingFormat)}
+                      >
+                        <span className="material-symbols-outlined !text-[18px] text-blue-500">description</span>
+                        <span>Export as DOC</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button
                   className="rounded-lg p-2 text-[#4c4d9a] transition-colors hover:bg-background-light dark:hover:bg-[#1c1d3a]"
                   type="button"
@@ -1007,6 +1115,13 @@ export const Editor = () => {
             <div className="mx-auto mt-4 max-w-2xl rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-900/50 dark:bg-blue-950/30">
               <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
                 This link has viewer access. You can view live updates, but editing is disabled.
+              </p>
+            </div>
+          )}
+          {exportError && (
+            <div className="mx-auto mt-4 max-w-2xl rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/50 dark:bg-red-950/30">
+              <p className="text-sm font-medium text-red-800 dark:text-red-300">
+                Export failed: {exportError}
               </p>
             </div>
           )}
