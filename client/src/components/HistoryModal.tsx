@@ -138,7 +138,7 @@ export const HistoryModal = ({
       />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div
-          className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-2xl bg-white dark:bg-[#1e1f3a] shadow-2xl"
+          className="relative flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#1e1f3a]"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -160,7 +160,7 @@ export const HistoryModal = ({
           </div>
 
           {/* Content */}
-          <div className="overflow-y-auto p-6">
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
