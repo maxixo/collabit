@@ -1,13 +1,29 @@
+import { Suspense, lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { createBrowserRouter, Navigate, useLocation } from "react-router-dom";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { useAuth } from "../auth/AuthContext";
-import { SignIn } from "../pages/SignIn";
-import { SignUp } from "../pages/SignUp";
-import { Editor } from "../pages/Editor";
-import { Recent } from "../pages/Recent";
-import { Starred } from "../pages/Starred";
-import { Trash } from "../pages/Trash";
-import { Profile } from "../pages/Profile";
+
+const SignInPage = lazy(() => import("../pages/SignIn").then((module) => ({ default: module.SignIn })));
+const SignUpPage = lazy(() => import("../pages/SignUp").then((module) => ({ default: module.SignUp })));
+const EditorPage = lazy(() => import("../pages/Editor").then((module) => ({ default: module.Editor })));
+const RecentPage = lazy(() => import("../pages/Recent").then((module) => ({ default: module.Recent })));
+const StarredPage = lazy(() => import("../pages/Starred").then((module) => ({ default: module.Starred })));
+const TrashPage = lazy(() => import("../pages/Trash").then((module) => ({ default: module.Trash })));
+const ProfilePage = lazy(() => import("../pages/Profile").then((module) => ({ default: module.Profile })));
+
+type RoutePage = LazyExoticComponent<ComponentType<unknown>>;
+
+const RouteFallback = () => <div className="auth-loading">Loading...</div>;
+
+const withSuspense = (Page: RoutePage) => (
+  <Suspense fallback={<RouteFallback />}>
+    <Page />
+  </Suspense>
+);
+
+const ProtectedPage = ({ page: Page }: { page: RoutePage }) => (
+  <ProtectedRoute>{withSuspense(Page)}</ProtectedRoute>
+);
 
 const isTruthyParam = (value: string | null) => {
   if (value === null) {
@@ -61,7 +77,7 @@ const ShareEditorRoute = () => {
     );
   }
 
-  return <Editor />;
+  return withSuspense(EditorPage);
 };
 
 export const router = createBrowserRouter([
@@ -76,41 +92,31 @@ export const router = createBrowserRouter([
   {
     path: "/editor",
     element: (
-      <ProtectedRoute>
-        <Editor/>
-      </ProtectedRoute>
+      <ProtectedPage page={EditorPage} />
     )
   },
   {
     path: "/editor/recent",
     element: (
-      <ProtectedRoute>
-        <Recent />
-      </ProtectedRoute>
+      <ProtectedPage page={RecentPage} />
     )
   },
   {
     path: "/editor/starred",
     element: (
-      <ProtectedRoute>
-        <Starred />
-      </ProtectedRoute>
+      <ProtectedPage page={StarredPage} />
     )
   },
   {
     path: "/editor/trash",
     element: (
-      <ProtectedRoute>
-        <Trash />
-      </ProtectedRoute>
+      <ProtectedPage page={TrashPage} />
     )
   },
   {
     path: "/profile",
     element: (
-      <ProtectedRoute>
-        <Profile />
-      </ProtectedRoute>
+      <ProtectedPage page={ProfilePage} />
     )
   },
   {
@@ -119,10 +125,10 @@ export const router = createBrowserRouter([
   },
   {
     path: "/auth/sign-in",
-    element: <SignIn />
+    element: withSuspense(SignInPage)
   },
   {
     path: "/auth/sign-up",
-    element: <SignUp />
+    element: withSuspense(SignUpPage)
   }
 ]);

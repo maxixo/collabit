@@ -114,7 +114,7 @@ class WebSocketYjsProvider implements YjsProvider {
       }
     });
 
-    this.provider.on('connection-error', (event: Event, provider: YWebsocketProvider) => {
+    this.provider.on('connection-error', (event: Event, _provider: YWebsocketProvider) => {
       console.error(`[YjsProvider] ❌ Connection error for ${this.documentId}:`, event);
     });
     

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, type Dispatch, type Reducer } from "react";
+import React, { createContext, useContext, useReducer, type Dispatch, type ReactNode, type Reducer } from "react";
 
 // Types
 export interface Collaborator {
@@ -147,7 +147,7 @@ const appReducer: Reducer<AppContextValue, AppAction> = (state, action) => {
         }
       };
     
-    case "REMOVE_COLLABORATOR":
+    case "REMOVE_COLLABORATOR": {
       const cursorPositionsAfterRemoval = new Map(state.presence.cursorPositions);
       cursorPositionsAfterRemoval.delete(action.payload);
       return {
@@ -158,8 +158,9 @@ const appReducer: Reducer<AppContextValue, AppAction> = (state, action) => {
           cursorPositions: cursorPositionsAfterRemoval
         }
       };
+    }
     
-    case "UPDATE_CURSOR":
+    case "UPDATE_CURSOR": {
       const cursorPositionsAfterUpdate = new Map(state.presence.cursorPositions);
       cursorPositionsAfterUpdate.set(action.payload.userId, action.payload.position);
       return {
@@ -169,6 +170,7 @@ const appReducer: Reducer<AppContextValue, AppAction> = (state, action) => {
           cursorPositions: cursorPositionsAfterUpdate
         }
       };
+    }
     
     case "SET_PENDING_CHANGES":
       return {
@@ -179,13 +181,14 @@ const appReducer: Reducer<AppContextValue, AppAction> = (state, action) => {
         }
       };
 
-    case "CLEAR_PENDING_CHANGES":
+    case "CLEAR_PENDING_CHANGES": {
       const updatedChanges = { ...state.pendingChanges };
       delete updatedChanges[action.payload];
       return {
         ...state,
         pendingChanges: updatedChanges
       };
+    }
 
     case "RESET_STATE":
       return initialState;
@@ -199,7 +202,7 @@ const appReducer: Reducer<AppContextValue, AppAction> = (state, action) => {
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 // Provider Component
-export const AppProvider = ({ children }: { children: any }) => {
+export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
   return React.createElement(AppContext.Provider, { value: { ...state, dispatch } }, children);

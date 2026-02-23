@@ -24,7 +24,7 @@ async function main() {
         await showMigrationStatus();
         break;
       
-      case "run":
+      case "run": {
         const migrationFile = process.argv[3];
         if (migrationFile) {
           await runMigration(migrationFile);
@@ -32,6 +32,7 @@ async function main() {
           await runMigrations();
         }
         break;
+      }
       
       default:
         console.log(`

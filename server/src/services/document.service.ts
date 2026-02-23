@@ -583,7 +583,7 @@ export const moveToTrash = async (
     params
   );
 
-  return result.rowCount > 0;
+  return (result.rowCount ?? 0) > 0;
 };
 
 export const restoreFromTrash = async (
@@ -617,7 +617,7 @@ export const restoreFromTrash = async (
     params
   );
 
-  return result.rowCount > 0;
+  return (result.rowCount ?? 0) > 0;
 };
 
 export const permanentlyDeleteDocument = async (
@@ -650,7 +650,7 @@ export const permanentlyDeleteDocument = async (
     params
   );
 
-  return result.rowCount > 0;
+  return (result.rowCount ?? 0) > 0;
 };
 
 export const getTrashDocuments = async (

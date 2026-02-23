@@ -27,7 +27,7 @@ export const createEditorExtensions = (options?: {
     StarterKit.configure({
       history: options?.collaboration?.doc ? false : undefined
     }),
-    Link as any
+    Link as Extension
   ];
 
   if (options?.collaboration?.doc) {

@@ -5,7 +5,7 @@ A full-stack, offline-first collaborative text editor scaffold for real-time tea
 ## Features
 - Real-time collaboration via WebSockets and CRDT (Yjs) stubs
 - Offline-first architecture (IndexedDB + Service Worker placeholders)
-- Scalable backend with PostgreSQL and Redis stubs
+- Scalable backend with PostgreSQL
 - Docker and Docker Compose for local and production workflows
 - Shared types module for client and server
 
@@ -13,33 +13,32 @@ A full-stack, offline-first collaborative text editor scaffold for real-time tea
 - Frontend: React, TypeScript, Vite
 - Backend: Express, TypeScript, WebSockets
 - CRDT: Yjs (placeholder integration)
-- Data: PostgreSQL, Redis
+- Data: PostgreSQL
 - Infra: Docker, Docker Compose
 
 ## Local Development (Step by Step)
 ### Prerequisites
 1. Install Node.js LTS (v20+).
-2. Install Docker if you want Postgres/Redis locally.
+2. Install Docker if you want Postgres locally.
 
 ### 1) Configure environment
 1. Copy the example environment file:
    - `cp .env.example .env`
 2. Fill in values in `.env` (at minimum):
    - `DATABASE_URL`
-   - `REDIS_URL`
    - `JWT_SECRET`
 
 ### 2) Install dependencies
 1. From the repo root:
    - `npm install`
 
-### 3) Start infrastructure (Postgres + Redis)
+### 3) Start infrastructure (Postgres)
 Option A: Docker Compose (recommended)
 1. Start services:
-   - `docker compose up -d postgres redis`
+   - `docker compose up -d postgres`
 
 Option B: Use your own instances
-1. Ensure Postgres and Redis are reachable.
+1. Ensure Postgres is reachable.
 2. Update `.env` with your connection URLs.
 
 ### 4) Run client + server together

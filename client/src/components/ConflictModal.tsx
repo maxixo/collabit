@@ -11,6 +11,15 @@ interface ConflictModalProps {
   onClose: () => void;
 }
 
+type PreviewTextNode = {
+  text?: string;
+};
+
+type PreviewParagraphNode = {
+  type?: string;
+  content?: PreviewTextNode[];
+};
+
 export const ConflictModal = ({
   isOpen,
   localVersion,
@@ -40,10 +49,13 @@ export const ConflictModal = ({
     }
     
     const text = content.content
-      .filter((node: any) => node.type === "paragraph")
-      .map((node: any) => {
+      .filter(
+        (node): node is PreviewParagraphNode =>
+          typeof node === "object" && node !== null && (node as { type?: unknown }).type === "paragraph"
+      )
+      .map((node) => {
         if (node.content) {
-          return node.content.map((t: any) => t.text).join(" ");
+          return node.content.map((textNode) => textNode.text ?? "").join(" ");
         }
         return "";
       })

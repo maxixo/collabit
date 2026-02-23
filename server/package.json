@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "lint": "eslint .",
+    "test": "node --test",
     "migrations:run": "tsx src/server.ts",
     "migrations:status": "tsx scripts/run-migrations.ts status"
   },
@@ -20,7 +21,6 @@
     "jsonwebtoken": "^9.0.2",
     "lib0": "^0.2.117",
     "pg": "^8.12.0",
-    "redis": "^4.7.0",
     "ws": "^8.18.0",
     "y-protocols": "^1.0.7",
     "y-websocket": "^3.0.0",

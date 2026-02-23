@@ -17,6 +17,12 @@ const googleConfig =
         }
       }
     : undefined;
+const advancedConfig = env.isProduction
+  ? undefined
+  : {
+      disableCSRFCheck: true,
+      disableOriginCheck: true
+    };
 
 export const auth = betterAuth({
   database: pool,
@@ -26,10 +32,7 @@ export const auth = betterAuth({
     enabled: true
   },
   socialProviders: googleConfig,
-  advanced: {
-    disableCSRFCheck: true,
-    disableOriginCheck: true
-  }
+  advanced: advancedConfig
 });
 
 export const runAuthMigrations = async () => {

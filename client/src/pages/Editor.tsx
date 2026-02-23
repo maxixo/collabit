@@ -71,7 +71,7 @@ export const Editor = () => {
     (shareRequested && !collabRequested);
   
   // Store hooks
-  const { recentDocuments, connectionStatus, saveStatus: globalSaveStatus, dispatch } = useAppStore();
+  const { recentDocuments, saveStatus: globalSaveStatus, dispatch } = useAppStore();
   const isOnline = useOnlineStatus();
   const [collaborationDocs, setCollaborationDocs] = useState<Record<string, boolean>>({});
   const presenceDocumentId = id && (collaborationDocs[id] || collaborationRequested) ? id : null;

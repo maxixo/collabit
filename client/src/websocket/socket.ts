@@ -58,7 +58,7 @@ export class WebSocketManager {
         }
       };
 
-      this.ws.onerror = (error) => {
+      this.ws.onerror = (_error) => {
         // Don't log errors excessively - they're usually just connection failures
         this.isConnecting = false;
       };

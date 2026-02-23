@@ -70,7 +70,7 @@ const getMigrationFiles = async (): Promise<string[]> => {
     return files
       .filter((file) => file.endsWith(".sql"))
       .sort();
-  } catch (error) {
+  } catch {
     logger.warn("Migrations directory not found or inaccessible");
     return [];
   }

@@ -164,7 +164,7 @@ export const indexDocument = async (document: IndexableDocument): Promise<void> 
       } else if (mutableIndex.discard) {
         mutableIndex.discard(entry.id);
       }
-    } catch (removeError) {
+    } catch {
       // Document might not exist in index yet, that's okay
     }
     

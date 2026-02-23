@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import type { ShareToken, ShareTokenOptions } from "@shared/types.js";
+import type { ShareToken, ShareTokenOptions, ShareTokenPermission } from "@shared/types.js";
 import { db } from "../config/db.js";
 
 type ShareTokenRow = {
@@ -21,7 +21,15 @@ type ShareTokenRow = {
   createdAt?: unknown;
 };
 
-const PERMISSION_LEVELS = new Set(["viewer", "editor", "owner"]);
+const PERMISSION_LEVELS: ReadonlySet<ShareTokenPermission> = new Set([
+  "viewer",
+  "editor",
+  "owner"
+]);
+
+const isShareTokenPermission = (value: string): value is ShareTokenPermission => {
+  return PERMISSION_LEVELS.has(value as ShareTokenPermission);
+};
 
 const parseTimestamp = (value: unknown): string | null => {
   if (typeof value === "string") {
@@ -53,7 +61,9 @@ const mapShareTokenRow = (row: ShareTokenRow): ShareToken => {
       : typeof row.permission_level === "string"
         ? row.permission_level
         : "viewer";
-  const permissionLevel = PERMISSION_LEVELS.has(permission) ? permission : "viewer";
+  const permissionLevel: ShareTokenPermission = isShareTokenPermission(permission)
+    ? permission
+    : "viewer";
 
   return {
     id: typeof row.id === "string" ? row.id : "",
@@ -89,8 +99,8 @@ export const generateShareToken = async (
 ): Promise<ShareToken> => {
   const id = randomUUID();
   const token = randomUUID();
-  const permissionLevel =
-    options.permission && PERMISSION_LEVELS.has(options.permission)
+  const permissionLevel: ShareTokenPermission =
+    options.permission && isShareTokenPermission(options.permission)
       ? options.permission
       : "viewer";
   const expirationDate =
