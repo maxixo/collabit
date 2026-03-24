@@ -231,7 +231,7 @@ export const SaveConfirmationModal = ({
 
           {pendingChanges.length > 0 && (
             <button
-              className="flex items-center gap-2 rounded-lg border-2 border-primary px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex items-center gap-2 rounded-lg border-2 border-emerald-600 px-4 py-2 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-50 dark:border-emerald-500 dark:text-emerald-300 dark:hover:bg-emerald-950/30 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={onSaveOnly}
               type="button"
               disabled={isSaving}
@@ -241,7 +241,7 @@ export const SaveConfirmationModal = ({
           )}
 
           <button
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
             onClick={() => onApplySave()}
             type="button"
             disabled={isSaving || (pendingChanges.length > 0 && selectedCount === 0)}

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { UserMenu } from "./UserMenu";
+import { useAuth } from "../auth/AuthContext";
 import { WorkspaceProvider, useWorkspace } from "../workspace/WorkspaceContext";
 
 type DashboardNav = "recent" | "starred" | "shared" | "trash";
@@ -43,12 +44,17 @@ const DashboardLayoutInner = ({
   children
 }: DashboardLayoutProps) => {
   const { workspace, isLoading } = useWorkspace();
+  const { user, status } = useAuth();
   const membershipLabel =
     workspace.membershipStatus === "owner"
       ? "Workspace owner"
       : workspace.membershipStatus === "member"
         ? "Workspace member"
         : "Guest access";
+  const userLabel =
+    status === "authenticated"
+      ? user?.name?.trim() || user?.email?.trim() || "User"
+      : "User";
 
   return (
     <div className="bg-background-light font-['Inter',_sans-serif] text-[#0d0e1b] dark:bg-background-dark dark:text-[#f8f8fc]">
@@ -117,22 +123,18 @@ const DashboardLayoutInner = ({
             </nav>
           </div>
 
-          <div className="flex flex-col gap-4">
-            <div className="rounded-lg bg-[#f8f8fc] p-3 dark:bg-[#1e1f3a]">
-              <div className="mb-2 flex justify-between text-xs font-bold">
-                <span>Workspace</span>
-                <span>{workspace.id}</span>
-              </div>
-              <div className="text-xs text-[#4c4d9a] dark:text-[#a1a1c9]">
-                Shared documents and profile settings now use live workspace data.
-              </div>
-            </div>
+          <div>
             <Link
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] transition-colors hover:bg-[#f0f0f7] dark:text-[#a1a1c9] dark:hover:bg-white/5"
+              className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] transition-colors hover:bg-[#f0f0f7] dark:text-[#a1a1c9] dark:hover:bg-white/5"
               to={buildWorkspacePath("/profile", workspaceId)}
             >
-              <span className="material-symbols-outlined">settings</span>
-              <p className="text-sm font-medium">Settings</p>
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="material-symbols-outlined">settings</span>
+                <p className="text-sm font-medium">Settings</p>
+              </div>
+              <p className="truncate text-xs font-medium text-[#6d6ea8] dark:text-[#a1a1c9]">
+                {userLabel}
+              </p>
             </Link>
           </div>
         </aside>
@@ -153,15 +155,7 @@ const DashboardLayoutInner = ({
             </div>
           ) : null}
 
-          <header className="sticky top-0 z-10 flex items-center justify-between border-b border-[#e7e7f3] bg-background-light px-8 py-4 dark:border-[#2a2b4a] dark:bg-background-dark">
-            <div className="flex-1 max-w-xl">
-              <div className="relative">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#4c4d9a] dark:text-[#a1a1c9]">
-                  search
-                </span>
-                <div className="skeleton-shimmer h-10 w-full rounded-lg bg-[#e7e7f3] dark:bg-[#1e1f3a]"></div>
-              </div>
-            </div>
+          <header className="sticky top-0 z-10 flex items-center justify-end border-b border-[#e7e7f3] bg-background-light px-8 py-4 dark:border-[#2a2b4a] dark:bg-background-dark">
             <div className="flex items-center gap-4">
               <button
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#e7e7f3] text-[#0d0e1b] dark:bg-[#1e1f3a] dark:text-white"

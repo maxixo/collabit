@@ -305,3 +305,12 @@ body {
   margin: 0 0 1rem;
   padding-left: 1.25rem;
 }
+
+/* Keep primary text accents light while making primary-filled controls darker. */
+.bg-primary {
+  background-color: #6163f5;
+}
+
+.hover\:bg-primary\/90:hover {
+  background-color: rgba(97, 99, 245, 0.9);
+}

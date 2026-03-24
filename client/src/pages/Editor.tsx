@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from "reac
 import type { JSONContent } from "@tiptap/core";
 import { EditorSurface } from "../editor/Editor";
 import { Presence } from "../editor/Presence";
+import { useAuth } from "../auth/AuthContext";
 import { useDocument } from "../hooks/useDocument";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { usePresence } from "../hooks/usePresence";
@@ -70,6 +71,7 @@ export const Editor = () => {
   
   // Store hooks
   const { recentDocuments, saveStatus: globalSaveStatus, dispatch } = useAppStore();
+  const { user, status } = useAuth();
   const isOnline = useOnlineStatus();
   const [collaborationDocs, setCollaborationDocs] = useState<Record<string, boolean>>({});
   const presenceDocumentId = id && (collaborationDocs[id] || collaborationRequested) ? id : null;
@@ -134,6 +136,10 @@ export const Editor = () => {
   const isTrashRoute = location.pathname === "/editor/trash";
   const buildWorkspaceRoute = (path: string) =>
     workspaceId ? `${path}?workspaceId=${encodeURIComponent(workspaceId)}` : path;
+  const userLabel =
+    status === "authenticated"
+      ? user?.name?.trim() || user?.email?.trim() || "User"
+      : "User";
 
   const navLinkClass = (isActive: boolean) =>
     isActive
@@ -902,22 +908,19 @@ export const Editor = () => {
               )}
             </nav>
 
-            <div className="flex items-center gap-3 border-t border-[#e7e7f3] pt-4 dark:border-[#2d2e4a]">
-              <div
-                className="h-9 w-9 rounded-full bg-cover bg-center"
-                data-alt="User profile avatar"
-                style={{
-                  backgroundImage:
-                    "url('https://lh3.googleusercontent.com/aida-public/AB6AXuBnHAR0qvuS976iJQFGjmdAYzYdSlvwYLTpOonSARtAYONkjK4RjF2WK1Gt3dO3NA9ORMoZmHLsj15sVV7B2QV8aDQBHWcU-m6_PUfujLRiFInzRFwQv2UiuFIsTkF3tmgSCN8BTp0FCleyGtzKHIug7k4eOgxXYbhMGXPPmeRHwMQgA656gELMdfNiLlF7JobK_DSTzuFenfVeHv1IWy8vgvHc1l6AZXzA_OAYDVivz4Fyr0E2bN5c5QrS6mZIp71ZfnUcQl5pxw')"
-                }}
-              ></div>
-              <div className="flex flex-col overflow-hidden">
-                <span className="truncate text-sm font-bold">Alex Rivera</span>
-                <span className="text-xs text-[#4c4d9a]">Pro Plan</span>
-              </div>
-              <button className="material-symbols-outlined ml-auto text-[#4c4d9a]" type="button">
-                settings
-              </button>
+            <div className="border-t border-[#e7e7f3] pt-4 dark:border-[#2d2e4a]">
+              <Link
+                className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] transition-colors hover:bg-[#f0f0f7] dark:text-[#a1a1c9] dark:hover:bg-white/5"
+                to={buildWorkspaceRoute("/profile")}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="material-symbols-outlined">settings</span>
+                  <span className="text-sm font-medium">Settings</span>
+                </div>
+                <span className="truncate text-xs font-medium text-[#6d6ea8] dark:text-[#a1a1c9]">
+                  {userLabel}
+                </span>
+              </Link>
             </div>
           </div>
         </aside>
