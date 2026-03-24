@@ -1,3 +1,4 @@
+
 node_modules
 dist
 build
@@ -5,3 +6,4 @@ build
 /*.md
 !README.md
 .DS_Store
+docs/
