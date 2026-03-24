@@ -7,11 +7,12 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color-scheme: dark;
+  font-family: "Spline Sans", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   line-height: 1.5;
-  background-color: #f8f8f6;
-  color: #1a1a1a;
+  background-color: #13131b;
+  color: #e4e1ed;
+  scroll-behavior: smooth;
 }
 
 * {
@@ -20,6 +21,9 @@
 
 body {
   margin: 0;
+  min-height: 100vh;
+  background: #13131b;
+  color: #e4e1ed;
 }
 
 .app-shell {
@@ -186,6 +190,16 @@ body {
   background: rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-card {
+  background: rgba(31, 31, 40, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.hero-gradient {
+  background: radial-gradient(circle at 50% 50%, rgba(97, 99, 245, 0.15) 0%, rgba(19, 19, 27, 0) 70%);
 }
 
 .brand-gradient {

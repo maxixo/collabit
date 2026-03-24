@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate, useLocation } from "react-router-dom";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { useAuth } from "../auth/AuthContext";
 
+const LandingPage = lazy(() => import("../pages/Landing").then((module) => ({ default: module.Landing })));
 const SignInPage = lazy(() => import("../pages/SignIn").then((module) => ({ default: module.SignIn })));
 const SignUpPage = lazy(() => import("../pages/SignUp").then((module) => ({ default: module.SignUp })));
 const EditorPage = lazy(() => import("../pages/Editor").then((module) => ({ default: module.Editor })));
@@ -84,11 +85,7 @@ const ShareEditorRoute = () => {
 export const router = createBrowserRouter([
   {
     path: "/",
-    element: (
-      <ProtectedRoute>
-        <Navigate to="/editor/recent" replace />
-      </ProtectedRoute>
-    )
+    element: withSuspense(LandingPage)
   },
   {
     path: "/editor",

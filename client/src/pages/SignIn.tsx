@@ -128,7 +128,7 @@ export const SignIn = () => {
                 <path d="M6 6H42L36 24L42 42H6L12 24L6 6Z" fill="currentColor" />
               </svg>
             </div>
-            <h2 className="text-2xl font-bold tracking-tight text-white">DesignApp</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-white">Collabit</h2>
           </div>
           <div className="relative z-10 max-w-lg">
             <h1 className="mb-8 text-6xl font-black leading-tight tracking-[-0.033em] text-white">
@@ -139,7 +139,7 @@ export const SignIn = () => {
             </p>
           </div>
           <div className="relative z-10 flex gap-6 text-xs font-semibold uppercase tracking-widest text-white/60">
-            <span>Ac 2024 DesignApp Inc.</span>
+            <span>2024 Collabit Inc.</span>
             <a className="transition-colors hover:text-white" href="#">
               Privacy
             </a>
@@ -157,7 +157,7 @@ export const SignIn = () => {
                   <path d="M6 6H42L36 24L42 42H6L12 24L6 6Z" fill="currentColor" />
                 </svg>
               </div>
-              <h2 className="text-xl font-bold tracking-tight text-white">DesignApp</h2>
+              <h2 className="text-xl font-bold tracking-tight text-white">Collabit</h2>
             </div>
 
             <div className="mb-10 flex flex-col gap-3">
