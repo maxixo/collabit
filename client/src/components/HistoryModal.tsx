@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { JSONContent } from "@tiptap/core";
 import type { DocumentVersion } from "../services/history.service";
 import { getDocumentHistory, restoreDocumentVersion } from "../services/history.service";
@@ -9,8 +9,9 @@ interface HistoryModalProps {
   documentId: string;
   workspaceId: string;
   shareToken?: string | null;
+  refreshToken?: number;
   documentTitle: string;
-  onRestore: (content: JSONContent) => void;
+  onRestore: (payload: { documentId: string; content: JSONContent }) => void;
 }
 
 export const HistoryModal = ({
@@ -19,6 +20,7 @@ export const HistoryModal = ({
   documentId,
   workspaceId,
   shareToken,
+  refreshToken = 0,
   documentTitle,
   onRestore
 }: HistoryModalProps) => {
@@ -28,28 +30,52 @@ export const HistoryModal = ({
   const [restoring, setRestoring] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<DocumentVersion | null>(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
+  const historyRequestIdRef = useRef(0);
 
   useEffect(() => {
-    if (isOpen && documentId && workspaceId) {
-      loadHistory();
-    }
-  }, [isOpen, documentId, workspaceId, shareToken]);
-
-  const loadHistory = async () => {
-    setLoading(true);
+    historyRequestIdRef.current += 1;
+    setVersions([]);
+    setSelectedVersion(null);
+    setShowRestoreConfirm(false);
     setError(null);
 
-    try {
-      const data = await getDocumentHistory(documentId, workspaceId, {
-        shareToken: shareToken ?? undefined
-      });
-      setVersions(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load history");
-    } finally {
+    if (!isOpen || !documentId || !workspaceId) {
       setLoading(false);
+      return;
     }
-  };
+
+    const requestId = historyRequestIdRef.current;
+    let isCancelled = false;
+
+    const loadHistory = async () => {
+      setLoading(true);
+
+      try {
+        const data = await getDocumentHistory(documentId, workspaceId, {
+          shareToken: shareToken ?? undefined
+        });
+        if (isCancelled || historyRequestIdRef.current !== requestId) {
+          return;
+        }
+        setVersions(data);
+      } catch (err) {
+        if (isCancelled || historyRequestIdRef.current !== requestId) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Failed to load history");
+      } finally {
+        if (!isCancelled && historyRequestIdRef.current === requestId) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadHistory();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, documentId, workspaceId, shareToken, refreshToken]);
 
   const handleRestoreClick = (version: DocumentVersion) => {
     setSelectedVersion(version);
@@ -59,17 +85,21 @@ export const HistoryModal = ({
   const handleRestoreConfirm = async () => {
     if (!selectedVersion) return;
 
+    const restoreDocumentId = documentId;
     setRestoring(true);
     setError(null);
 
     try {
       const result = await restoreDocumentVersion(
-        documentId,
+        restoreDocumentId,
         selectedVersion.versionNumber,
         workspaceId,
         { shareToken: shareToken ?? undefined }
       );
-      onRestore(result.content as JSONContent);
+      onRestore({
+        documentId: restoreDocumentId,
+        content: result.content as JSONContent
+      });
       setShowRestoreConfirm(false);
       setSelectedVersion(null);
       onClose();

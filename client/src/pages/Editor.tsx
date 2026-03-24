@@ -119,6 +119,7 @@ export const Editor = () => {
   
   // History Modal State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
   const [contentResetVersion, setContentResetVersion] = useState(0);
   
   // Display helpers - declare these early since they're used in conditional checks
@@ -129,6 +130,10 @@ export const Editor = () => {
   const shouldFocusTitle = Boolean((location.state as { focusTitle?: boolean } | null)?.focusTitle);
   const isRecentRoute = location.pathname === "/editor/recent";
   const isStarredRoute = location.pathname === "/editor/starred";
+  const isSharedRoute = location.pathname === "/editor/shared";
+  const isTrashRoute = location.pathname === "/editor/trash";
+  const buildWorkspaceRoute = (path: string) =>
+    workspaceId ? `${path}?workspaceId=${encodeURIComponent(workspaceId)}` : path;
 
   const navLinkClass = (isActive: boolean) =>
     isActive
@@ -426,7 +431,7 @@ export const Editor = () => {
     documentId: documentId || "",
     workspaceId,
     shareToken: shareToken ?? undefined,
-    enabled: Boolean(documentId && workspaceId && collaborationEnabled)
+    enabled: Boolean(documentId && workspaceId)
   });
 
   const applyLocalStarUpdate = useCallback(
@@ -583,6 +588,14 @@ export const Editor = () => {
     });
   }, [id, workspaceId, navigate]);
 
+  const getVersionSaveSnapshot = useCallback(() => {
+    const currentDocument = documentRef.current;
+    return {
+      title: currentDocument?.title,
+      content: (currentDocument?.content as Record<string, unknown>) ?? undefined
+    };
+  }, []);
+
   // Handle save with pending changes
   const handleSave = useCallback(() => {
     if (hasPendingChanges) {
@@ -591,70 +604,78 @@ export const Editor = () => {
       // Manual version save even when there are no pending collaborator changes.
       void versionSaveDocument({
         applyPendingChanges: true,
-        title: activeDocument?.title,
-        content: (activeDocument?.content as Record<string, unknown>) ?? undefined
-      }).catch((error) => {
-        console.error("Failed to save document version:", error);
-      });
+        ...getVersionSaveSnapshot()
+      })
+        .then(() => {
+          setHistoryRefreshToken((current) => current + 1);
+        })
+        .catch((error) => {
+          console.error("Failed to save document version:", error);
+        });
     }
-  }, [hasPendingChanges, versionSaveDocument, activeDocument]);
+  }, [getVersionSaveSnapshot, hasPendingChanges, versionSaveDocument]);
 
   // Handle save confirmation - apply pending changes and save
   const handleApplySave = useCallback(async () => {
     try {
       await versionSaveDocument({
         applyPendingChanges: true,
-        title: activeDocument?.title,
-        content: (activeDocument?.content as Record<string, unknown>) ?? undefined
+        ...getVersionSaveSnapshot()
       });
+      setHistoryRefreshToken((current) => current + 1);
       setShowSaveModal(false);
     } catch (error) {
       console.error("Failed to save document:", error);
     }
-  }, [versionSaveDocument, activeDocument]);
+  }, [getVersionSaveSnapshot, versionSaveDocument]);
 
   // Handle save without applying pending changes
   const handleSaveOnly = useCallback(async () => {
     try {
       await versionSaveDocument({
         applyPendingChanges: false,
-        title: activeDocument?.title,
-        content: (activeDocument?.content as Record<string, unknown>) ?? undefined
+        ...getVersionSaveSnapshot()
       });
+      setHistoryRefreshToken((current) => current + 1);
       setShowSaveModal(false);
     } catch (error) {
       console.error("Failed to save document:", error);
     }
-  }, [versionSaveDocument, activeDocument]);
+  }, [getVersionSaveSnapshot, versionSaveDocument]);
 
   // Handle history restore
-  const handleHistoryRestore = useCallback((content: JSONContent) => {
-    if (!activeDocument) {
-      return;
-    }
-    
-    const nextDocument = {
-      ...activeDocument,
-      content: content as Record<string, unknown>,
-      updatedAt: new Date().toISOString()
-    };
+  const handleHistoryRestore = useCallback(
+    ({ documentId: restoredDocumentId, content }: { documentId: string; content: JSONContent }) => {
+      const currentDocument = documentRef.current;
+      if (!currentDocument || currentDocument.id !== restoredDocumentId) {
+        return;
+      }
 
-    documentRef.current = nextDocument;
-    updateDocumentRef.current(nextDocument);
-    setContentResetVersion((current) => current + 1);
-    
-    // Update in recent documents list
-    if (activeDocument.id) {
-      dispatch(actions.updateRecentDocument({
-        id: activeDocument.id,
-        title: activeDocument.title,
-        updatedAt: new Date().toISOString(),
-        ownerId: activeDocument.ownerId,
-        workspaceId: activeDocument.workspaceId || workspaceId,
-        isStarred: activeDocument.isStarred
-      }));
-    }
-  }, [activeDocument, workspaceId, dispatch]);
+      const nextDocument = {
+        ...currentDocument,
+        content: content as Record<string, unknown>,
+        updatedAt: new Date().toISOString()
+      };
+
+      documentRef.current = nextDocument;
+      updateDocumentRef.current(nextDocument);
+      setContentResetVersion((current) => current + 1);
+
+      if (currentDocument.id) {
+        dispatch(
+          actions.updateRecentDocument({
+            id: currentDocument.id,
+            title: currentDocument.title,
+            updatedAt: new Date().toISOString(),
+            ownerId: currentDocument.ownerId,
+            workspaceId: currentDocument.workspaceId || workspaceId,
+            isStarred: currentDocument.isStarred
+          })
+        );
+      }
+    },
+    [workspaceId, dispatch]
+  );
 
   // Register debug commands on mount
   useEffect(() => {
@@ -792,7 +813,7 @@ export const Editor = () => {
               </p>
               <Link
                 className={navLinkClass(isRecentRoute)}
-                to="/editor/recent"
+                to={buildWorkspaceRoute("/editor/recent")}
                 aria-current={isRecentRoute ? "page" : undefined}
               >
                 <span
@@ -805,11 +826,27 @@ export const Editor = () => {
               </Link>
               <Link
                 className={navLinkClass(isStarredRoute)}
-                to="/editor/starred"
+                to={buildWorkspaceRoute("/editor/starred")}
                 aria-current={isStarredRoute ? "page" : undefined}
               >
                 <span className="material-symbols-outlined">star</span>
                 <span className="text-sm font-medium">Starred</span>
+              </Link>
+              <Link
+                className={navLinkClass(isSharedRoute)}
+                to={buildWorkspaceRoute("/editor/shared")}
+                aria-current={isSharedRoute ? "page" : undefined}
+              >
+                <span className="material-symbols-outlined">group</span>
+                <span className="text-sm font-medium">Shared</span>
+              </Link>
+              <Link
+                className={navLinkClass(isTrashRoute)}
+                to={buildWorkspaceRoute("/editor/trash")}
+                aria-current={isTrashRoute ? "page" : undefined}
+              >
+                <span className="material-symbols-outlined">delete</span>
+                <span className="text-sm font-medium">Trash</span>
               </Link>
               <a
                 className="flex items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] hover:bg-[#e7e7f3]/50 dark:text-[#8a8bbd] dark:hover:bg-[#1c1d3a]/50"
@@ -889,7 +926,7 @@ export const Editor = () => {
           <header className="z-20 flex h-16 items-center justify-between border-b border-[#e7e7f3] bg-white/80 px-8 backdrop-blur-md dark:border-[#2d2e4a] dark:bg-background-dark/80">
             <div className="flex flex-col">
               <div className="mb-0.5 flex items-center gap-1.5 text-xs font-medium text-[#4c4d9a]">
-                <Link className="transition-colors hover:text-primary" to="/editor/recent">
+                <Link className="transition-colors hover:text-primary" to={buildWorkspaceRoute("/editor/recent")}>
                   Docs
                 </Link>
                 <span>/</span>
@@ -1168,11 +1205,13 @@ export const Editor = () => {
       {/* History Modal */}
       {showHistoryModal && documentId && (
         <HistoryModal
+          key={`${documentId}:${workspaceId}:${shareToken ?? ""}`}
           isOpen={showHistoryModal}
           onClose={() => setShowHistoryModal(false)}
           documentId={documentId}
           workspaceId={workspaceId}
           shareToken={shareToken}
+          refreshToken={historyRefreshToken}
           documentTitle={displayTitle}
           onRestore={handleHistoryRestore}
         />
