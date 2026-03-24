@@ -85,7 +85,8 @@ export const Editor = () => {
     loading,
     error,
     saveStatus,
-    conflictState
+    conflictState,
+    reloadDocument
   } = useDocument(id, workspaceId, { shareToken: shareToken ?? undefined });
   const activeDocument = id ? (document?.id === id ? document : null) : document;
   const documentRef = useRef(activeDocument);
@@ -505,26 +506,47 @@ export const Editor = () => {
   );
 
   // Conflict resolution handlers
-  const handleKeepLocal = useCallback(() => {
-    // Force save local version to server
+  const handleKeepLocalCopy = useCallback(async () => {
     const currentDocument = documentRef.current;
-    if (currentDocument) {
-      updateDocumentRef.current(currentDocument);
+    if (!currentDocument || !workspaceId) {
+      return;
     }
-    setShowConflictModal(false);
+
+    try {
+      const duplicateTitle = `${currentDocument.title?.trim() || "Untitled document"} (local copy)`;
+      const duplicated = await createDocument({
+        title: duplicateTitle,
+        content: currentDocument.content,
+        workspaceId
+      });
+
+      setShowConflictModal(false);
+      navigate(
+        `/editor/${encodeURIComponent(duplicated.id)}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        { state: { focusTitle: true } }
+      );
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Failed to duplicate local copy.");
+    }
+  }, [navigate, workspaceId]);
+
+  const handleDownloadLocal = useCallback(() => {
+    const currentDocument = documentRef.current;
+    if (!currentDocument) {
+      return;
+    }
+
+    exportDocumentAsDoc({
+      title: `${currentDocument.title?.trim() || "Untitled document"} (local copy)`,
+      content: currentDocument.content as JSONContent,
+      updatedAt: currentDocument.updatedAt
+    });
   }, []);
 
   const handleUseServer = useCallback(() => {
-    // Reload server version
     setShowConflictModal(false);
-    window.location.reload();
-  }, []);
-
-  const handleMergeManual = useCallback(() => {
-    // Open manual merge interface (for now, close modal)
-    setShowConflictModal(false);
-    alert("Manual merge feature coming soon!");
-  }, []);
+    reloadDocument();
+  }, [reloadDocument]);
 
   const handleConflictClose = useCallback(() => {
     setShowConflictModal(false);
@@ -1116,9 +1138,9 @@ export const Editor = () => {
         localVersion={localVersion}
         serverVersion={serverVersion}
         documentTitle={displayTitle}
-        onKeepLocal={handleKeepLocal}
+        onKeepLocalCopy={() => void handleKeepLocalCopy()}
         onUseServer={handleUseServer}
-        onMergeManual={handleMergeManual}
+        onDownloadLocal={handleDownloadLocal}
         onClose={handleConflictClose}
       />
       {showShareModal && documentId && (

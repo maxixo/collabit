@@ -23,7 +23,7 @@ export interface DocumentDetail extends DocumentSummary {
 
 export type DocumentAccessRole = "viewer" | "editor" | "owner";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? "http://localhost:4000";
 
 const parseJson = async <T>(response: Response): Promise<T> => {
   const data = (await response.json()) as T;
@@ -90,6 +90,17 @@ export const fetchStarredDocuments = async (workspaceId: string): Promise<Docume
     }
     throw error;
   }
+};
+
+export const fetchSharedDocuments = async (workspaceId: string): Promise<DocumentSummary[]> => {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/shared?workspaceId=${encodeURIComponent(workspaceId)}`,
+    { credentials: "include" }
+  );
+  const data = await parseJson<{ documents: DocumentSummary[] }>(response);
+  const documents = data.documents ?? [];
+  await safeStore(() => saveDocuments(documents));
+  return documents;
 };
 
 export const fetchTrashDocuments = async (workspaceId: string): Promise<DocumentSummary[]> => {

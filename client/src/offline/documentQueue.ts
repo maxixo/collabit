@@ -1,19 +1,14 @@
 import type { TipTapContent, DocumentDetail } from "../services/document.service";
 import { fetchDocumentById, updateDocument } from "../services/document.service";
 import { createOfflineQueue, type OfflineQueueItem } from "./offlineQueue";
+import {
+  collapseDocumentQueueEntries,
+  hasDocumentConflict,
+  type DocumentQueuePayload
+} from "./documentQueue.helpers";
 
 const DOCUMENT_QUEUE_TYPE = "document_update";
 const DOCUMENT_QUEUE_EVENT = "document-queue-status";
-
-type DocumentQueuePayload = {
-  type: typeof DOCUMENT_QUEUE_TYPE;
-  operation: "update_title_content";
-  title: string;
-  content: TipTapContent;
-  updatedAtClient: string;
-  baseUpdatedAt?: string | null;
-  shareToken?: string;
-};
 
 export type DocumentQueueItem = OfflineQueueItem & {
   workspaceId: string;
@@ -75,20 +70,6 @@ const isDocumentQueueItem = (item: OfflineQueueItem): item is DocumentQueueItem 
 
 const isConnectivityError = (error: unknown) => {
   return error instanceof TypeError || !navigator.onLine;
-};
-
-const isConflict = (
-  queued: DocumentQueuePayload,
-  serverDocument: DocumentDetail
-) => {
-  if (!queued.baseUpdatedAt || queued.baseUpdatedAt === serverDocument.updatedAt) {
-    return false;
-  }
-
-  return (
-    queued.title !== serverDocument.title ||
-    JSON.stringify(queued.content) !== JSON.stringify(serverDocument.content)
-  );
 };
 
 export const subscribeToDocumentQueue = (
@@ -162,28 +143,10 @@ export const getQueuedDocumentUpdate = async (documentId: string) => {
 
 export const flushDocumentQueue = async () => {
   const items = await queue.list();
-  const groups = new Map<string, DocumentQueueItem[]>();
+  const documentItems = items.filter(isDocumentQueueItem);
+  const latestEntries = collapseDocumentQueueEntries(documentItems);
 
-  for (const item of items) {
-    if (!isDocumentQueueItem(item)) {
-      continue;
-    }
-
-    const key = `${item.workspaceId}:${item.documentId}`;
-    const existing = groups.get(key);
-    if (existing) {
-      existing.push(item);
-    } else {
-      groups.set(key, [item]);
-    }
-  }
-
-  const orderedGroups = Array.from(groups.values()).sort(
-    (left, right) => left[0].createdAt - right[0].createdAt
-  );
-
-  for (const entries of orderedGroups) {
-    const latest = entries.sort((left, right) => right.createdAt - left.createdAt)[0];
+  for (const latest of latestEntries) {
     emitQueueStatus({ documentId: latest.documentId, status: "syncing" });
 
     const result = await replayDocumentUpdate(latest);
@@ -196,7 +159,9 @@ export const flushDocumentQueue = async () => {
       break;
     }
 
-    for (const entry of entries) {
+    for (const entry of documentItems.filter(
+      (item) => item.documentId === latest.documentId && item.workspaceId === latest.workspaceId
+    )) {
       await queue.remove(entry.id);
     }
 
@@ -241,7 +206,7 @@ const replayDocumentUpdate = async (entry: DocumentQueueItem): Promise<FlushResu
       return { status: "rejected", message: "Document not found on reconnect." };
     }
 
-    if (isConflict(entry.payload, serverDocument)) {
+    if (hasDocumentConflict(entry.payload, serverDocument)) {
       return { status: "conflict", server: serverDocument };
     }
 

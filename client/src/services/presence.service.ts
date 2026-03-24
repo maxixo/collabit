@@ -43,14 +43,19 @@ const postPresence = async (
   path: string,
   payload?: Record<string, unknown>
 ) => {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json"
+  };
+  const jwtHeaders = getJwtHeaders();
+  if (jwtHeaders.Authorization) {
+    headers.Authorization = jwtHeaders.Authorization;
+  }
+
   const response = await fetch(
     `${PRESENCE_BASE_URL}/api/presence/${encodeURIComponent(documentId)}/${path}`,
     {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...getJwtHeaders()
-      },
+      headers,
       credentials: "include",
       body: payload ? JSON.stringify(payload) : undefined
     }

@@ -1,7 +1,9 @@
 export interface UserModel {
   id: string;
   email: string;
+  name: string;
   displayName: string;
+  image: string | null;
 }
 
 export const mapUserRow = (_row: unknown): UserModel => {
@@ -36,6 +38,15 @@ export const mapUserRow = (_row: unknown): UserModel => {
             ? row.full_name
             : "";
 
+  const image =
+    typeof row.image === "string"
+      ? row.image
+      : typeof row.avatar_url === "string"
+        ? row.avatar_url
+        : typeof row.avatarUrl === "string"
+          ? row.avatarUrl
+          : null;
+
   const displayName =
     rawDisplayName.trim() ||
     (email ? email.split("@")[0] : "") ||
@@ -44,6 +55,8 @@ export const mapUserRow = (_row: unknown): UserModel => {
   return {
     id,
     email,
-    displayName
+    name: rawDisplayName.trim() || displayName,
+    displayName,
+    image: image?.trim() || null
   };
 };

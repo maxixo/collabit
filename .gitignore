@@ -7,3 +7,6 @@ build
 !README.md
 .DS_Store
 docs/
+# Keep generated or local markdown notes under docs/ out of git.
+docs/**/*.md
+.github/

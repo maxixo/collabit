@@ -1,7 +1,14 @@
-# Tests
+# Server Tests
 
-## Overview
-- TODO: Add test strategy and tooling notes.
+The server test suite runs through the workspace test script:
 
-## Running
-- TODO: Add commands for running tests.
+```bash
+npm run test --workspace server
+```
+
+Current coverage focuses on the Phase 1 public-release hardening work:
+
+- profile payload validation
+- workspace naming fallback behavior
+
+Add API or database-backed tests here as additional release blockers are implemented.

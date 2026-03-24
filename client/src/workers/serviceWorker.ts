@@ -5,6 +5,27 @@ const API_CACHE = `editor-api-${SW_VERSION}`;
 
 const SHELL_URLS = ["/", "/index.html"];
 
+type ServiceWorkerLifecycleEvent = Event & {
+  waitUntil: (promise: Promise<unknown>) => void;
+};
+
+type ServiceWorkerFetchEvent = Event & {
+  request: Request;
+  respondWith: (response: Promise<Response> | Response) => void;
+};
+
+type ServiceWorkerScope = typeof self & {
+  skipWaiting: () => void;
+  clients: {
+    claim: () => Promise<void>;
+  };
+  addEventListener: {
+    (type: "install", listener: (event: ServiceWorkerLifecycleEvent) => void): void;
+    (type: "activate", listener: (event: ServiceWorkerLifecycleEvent) => void): void;
+    (type: "fetch", listener: (event: ServiceWorkerFetchEvent) => void): void;
+  };
+};
+
 const isServiceWorkerScope = () => typeof self !== "undefined" && "skipWaiting" in self;
 
 const shouldCacheResponse = (response: Response) => response.ok || response.type === "opaque";
@@ -53,16 +74,16 @@ const networkFirst = async (request: Request, cacheName: string, fallbackRequest
 };
 
 if (isServiceWorkerScope()) {
-  const sw = self as unknown as ServiceWorkerGlobalScope;
+  const sw = self as unknown as ServiceWorkerScope;
 
-  sw.addEventListener("install", (event) => {
+  sw.addEventListener("install", (event: ServiceWorkerLifecycleEvent) => {
     event.waitUntil(
       caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_URLS)).catch(() => undefined)
     );
     sw.skipWaiting();
   });
 
-  sw.addEventListener("activate", (event) => {
+  sw.addEventListener("activate", (event: ServiceWorkerLifecycleEvent) => {
     event.waitUntil(
       caches.keys().then((keys) =>
         Promise.all(
@@ -78,7 +99,7 @@ if (isServiceWorkerScope()) {
     sw.clients.claim();
   });
 
-  sw.addEventListener("fetch", (event) => {
+  sw.addEventListener("fetch", (event: ServiceWorkerFetchEvent) => {
     const { request } = event;
     if (request.method !== "GET") {
       return;

@@ -1,6 +1,7 @@
 import { Router, type Response } from "express";
 import { authMiddleware, type AuthenticatedRequest } from "../middlewares/auth.middleware.js";
-import { getUserById, listUsers } from "../services/user.service.js";
+import { validateProfileUpdatePayload } from "./profile.validation.js";
+import { getUserById, listUsers, updateUserById } from "../services/user.service.js";
 
 export const userRoutes = Router();
 
@@ -27,6 +28,38 @@ userRoutes.get("/", async (req: AuthenticatedRequest, res, next) => {
 
     const users = await listUsers(limit);
     res.json({ users });
+  } catch (error) {
+    next(error);
+  }
+});
+
+userRoutes.patch("/me", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+
+    const validation = validateProfileUpdatePayload(req.body);
+    if (!validation.ok) {
+      res.status(400).json({ message: validation.message });
+      return;
+    }
+
+    const user = await updateUserById(userId, validation.data);
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        image: user.image
+      }
+    });
   } catch (error) {
     next(error);
   }

@@ -45,6 +45,35 @@ const buildSelectClause = (schema: UserSchemaInfo) => {
   return selections.length > 0 ? selections.join(", ") : "*";
 };
 
+const resolveNameColumn = (schema: UserSchemaInfo) => {
+  if (schema.columns.has("name")) {
+    return "name";
+  }
+  if (schema.columns.has("display_name")) {
+    return "display_name";
+  }
+  if (schema.columns.has("displayName")) {
+    return "displayName";
+  }
+  if (schema.columns.has("full_name")) {
+    return "full_name";
+  }
+  return "";
+};
+
+const resolveImageColumn = (schema: UserSchemaInfo) => {
+  if (schema.columns.has("image")) {
+    return "image";
+  }
+  if (schema.columns.has("avatar_url")) {
+    return "avatar_url";
+  }
+  if (schema.columns.has("avatarUrl")) {
+    return "avatarUrl";
+  }
+  return "";
+};
+
 const buildOrderByClause = (schema: UserSchemaInfo) => {
   const orderColumn = schema.columns.has("created_at")
     ? "created_at"
@@ -106,6 +135,65 @@ export const getUserById = async (id: string): Promise<UserModel | null> => {
       LIMIT 1
     `,
     [id]
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return mapUserRow(rows[0]);
+};
+
+export const updateUserById = async (
+  id: string,
+  updates: { name?: string; image?: string | null }
+): Promise<UserModel | null> => {
+  if (!id) {
+    return null;
+  }
+
+  const schema = await getUserSchemaInfo();
+  const idColumn = resolveIdColumn(schema);
+  if (!idColumn) {
+    throw new Error("User table does not have a supported id column.");
+  }
+
+  const assignments: string[] = [];
+  const params: Array<unknown> = [];
+  const addParam = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  if (typeof updates.name !== "undefined") {
+    const nameColumn = resolveNameColumn(schema);
+    if (nameColumn) {
+      assignments.push(`${quoteIdentifier(nameColumn)} = ${addParam(updates.name)}`);
+    }
+  }
+
+  if (typeof updates.image !== "undefined") {
+    const imageColumn = resolveImageColumn(schema);
+    if (imageColumn) {
+      assignments.push(`${quoteIdentifier(imageColumn)} = ${addParam(updates.image)}`);
+    }
+  }
+
+  if (assignments.length === 0) {
+    return getUserById(id);
+  }
+
+  const selectClause = buildSelectClause(schema);
+  const idParam = addParam(id);
+
+  const { rows } = await db.query(
+    `
+      UPDATE ${schema.tableIdentifier}
+      SET ${assignments.join(", ")}
+      WHERE ${quoteIdentifier(idColumn)} = ${idParam}
+      RETURNING ${selectClause}
+    `,
+    params
   );
 
   if (rows.length === 0) {

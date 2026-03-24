@@ -9,6 +9,7 @@ import {
   createDocument,
   emptyTrash,
   getDocumentById,
+  listSharedDocuments,
   getStarredDocuments,
   getTrashDocuments,
   listDocuments,
@@ -316,6 +317,26 @@ documentRoutes.get("/starred", async (req: AuthenticatedRequest, res, next) => {
     }
 
     const documents = await getStarredDocuments(workspaceId, userId);
+    res.json({ documents });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.get("/shared", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+
+    const documents = await listSharedDocuments(workspaceId, userId);
     res.json({ documents });
   } catch (error) {
     next(error);

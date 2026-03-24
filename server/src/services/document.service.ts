@@ -552,6 +552,47 @@ export const getStarredDocuments = async (
   return rows.map(mapDocumentSummaryRow);
 };
 
+export const listSharedDocuments = async (
+  workspaceId: string,
+  userId: string
+): Promise<DocumentSummary[]> => {
+  const schema = await getDocumentSchemaInfo();
+  if (!schema.hasDocumentMembers) {
+    return [];
+  }
+
+  const { params, addParam } = createParamBuilder();
+  const userParam = addParam(userId);
+  const workspaceParam = addParam(workspaceId);
+  const workspaceClause = schema.hasWorkspaceId ? `AND d.workspace_id = ${workspaceParam}` : "";
+  const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : `${workspaceParam} AS workspace_id`;
+  const starJoin = schema.hasStarredDocuments
+    ? `LEFT JOIN starred_documents s ON d.id = s.document_id AND s.user_id = ${userParam}`
+    : "";
+  const starSelect = schema.hasStarredDocuments
+    ? "COALESCE(s.document_id IS NOT NULL, false) AS is_starred"
+    : "FALSE AS is_starred";
+  const deletedClause = schema.hasDeletedAt ? "AND d.deleted_at IS NULL" : "";
+
+  const { rows } = await db.query(
+    `
+      SELECT d.id, d.title, d.updated_at, d.owner_id, ${workspaceSelect}, ${starSelect}
+      FROM documents d
+      JOIN document_members m
+        ON d.id = m.document_id
+       AND m.user_id = ${userParam}
+      ${starJoin}
+      WHERE d.owner_id <> ${userParam}
+      ${workspaceClause}
+      ${deletedClause}
+      ORDER BY d.updated_at DESC
+    `,
+    params
+  );
+
+  return rows.map(mapDocumentSummaryRow);
+};
+
 export const moveToTrash = async (
   documentId: string,
   workspaceId: string,

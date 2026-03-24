@@ -71,6 +71,7 @@ export const useDocument = (
   const [saveError, setSaveError] = useState<string | null>(null);
   const [accessRole, setAccessRole] = useState<"viewer" | "editor" | "owner" | null>(null);
   const [conflictState, setConflictState] = useState<DocumentConflictState | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const saveCounterRef = useRef(0);
   const pendingSaveRef = useRef(0);
   const currentDocumentIdRef = useRef<string | null>(null);
@@ -287,7 +288,7 @@ export const useDocument = (
       }
       cancelPendingSave();
     };
-  }, [cancelPendingSave, documentId, shareToken, workspaceId]);
+  }, [cancelPendingSave, documentId, reloadNonce, shareToken, workspaceId]);
 
   useEffect(() => {
     if (!documentId) {
@@ -352,8 +353,10 @@ export const useDocument = (
         return;
       }
 
-      setSaveStatus("error");
-      setSaveError(event.message);
+      if (event.status === "error") {
+        setSaveStatus("error");
+        setSaveError(event.message);
+      }
     });
   }, [documentId]);
 
@@ -420,6 +423,10 @@ export const useDocument = (
     setSaveStatus("saved");
   }, []);
 
+  const reloadDocument = useCallback(() => {
+    setReloadNonce((current) => current + 1);
+  }, []);
+
   return {
     document,
     accessRole,
@@ -430,6 +437,7 @@ export const useDocument = (
     saveStatus,
     saveError,
     conflictState,
-    clearConflict
+    clearConflict,
+    reloadDocument
   };
 };

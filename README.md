@@ -1,80 +1,82 @@
-# Live Team Collaborative Text Editor
+# Collaborative Editor
 
-A full-stack, offline-first collaborative text editor scaffold for real-time teamwork. This repository provides a production-ready foundation with placeholders for CRDT sync, auth, and persistence.
+This repository contains a full-stack collaborative document editor built with React, Vite, Express, PostgreSQL, Better Auth, and Yjs.
 
-## Features
-- Real-time collaboration via WebSockets and CRDT (Yjs) stubs
-- Offline-first architecture (IndexedDB + Service Worker placeholders)
-- Scalable backend with PostgreSQL
-- Docker and Docker Compose for local and production workflows
-- Shared types module for client and server
+## Phase 1 MVP Surface
 
-## Tech Stack
-- Frontend: React, TypeScript, Vite
-- Backend: Express, TypeScript, WebSockets
-- CRDT: Yjs (placeholder integration)
-- Data: PostgreSQL
-- Infra: Docker, Docker Compose
+- Real document create, edit, star, trash, restore, history, and export flows
+- Real-time collaboration transport for shared documents
+- Offline cached reads plus queued document and star mutations on reconnect
+- Shared-documents workspace view at `/editor/shared`
+- Self-service profile editing at `/profile`
+- Conflict handling with safe fallbacks:
+  - duplicate the local copy
+  - download the local copy
+  - reload the latest server version
 
-## Local Development (Step by Step)
+## Local Development
+
 ### Prerequisites
-1. Install Node.js LTS (v20+).
-2. Install Docker if you want Postgres locally.
 
-### 1) Configure environment
-1. Copy the example environment file:
-   - `cp .env.example .env`
-2. Fill in values in `.env` (at minimum):
-   - `DATABASE_URL`
-   - `JWT_SECRET`
+- Node.js 20+
+- PostgreSQL
 
-### 2) Install dependencies
-1. From the repo root:
-   - `npm install`
+### Environment
 
-### 3) Start infrastructure (Postgres)
-Option A: Docker Compose (recommended)
-1. Start services:
-   - `docker compose up -d postgres`
+Create `.env` from `.env.example` and set:
 
-Option B: Use your own instances
-1. Ensure Postgres is reachable.
-2. Update `.env` with your connection URLs.
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `AUTH_SECRET`
+- `AUTH_BASE_URL`
+- `CORS_ORIGINS`
+- `VITE_API_BASE_URL`
+- `VITE_WS_URL`
 
-### 4) Run client + server together
-1. From the repo root:
-   - `npm run dev`
-2. Client runs on:
-   - `http://localhost:5173/`
-3. Server runs on:
-   - `http://localhost:4000`
+Optional for Google OAuth:
 
-### 5) Run client and server separately (optional)
-Client (Vite):
-1. `cd client`
-2. `npm run dev`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
 
-Server (Express):
-1. `cd server`
-2. `npm run dev`
+### Install
 
-### 6) Production build (optional)
-1. From the repo root:
-   - `npm run build`
+```bash
+npm install
+```
 
-### Troubleshooting
-- If `npm install` fails, retry after clearing npm cache:
-  - `npm cache clean --force`
+### Run
 
-## Offline Demo (Placeholder)
-The client includes an IndexedDB wrapper and Service Worker registration stub. Once implemented, you can disconnect your network to verify queued edits are stored locally and replayed on reconnect.
+```bash
+npm run dev
+```
 
-## Architecture Summary
-- `client/` hosts the React UI and offline-first scaffolding
-- `server/` hosts the API, WebSocket gateway, and collaboration stubs
-- `shared/` contains cross-cutting types and event contracts
-- `docker/` contains Dockerfiles and Nginx config
-- `docs/` contains architectural notes and future design decisions
+- Client: `http://localhost:5173`
+- Server: `http://localhost:4000`
 
-## Notes
-This repository is scaffold-only. TODO markers indicate where business logic and integrations should be implemented.
+### Quality Checks
+
+```bash
+npm run lint
+npm run test
+npm run build
+```
+
+## Architecture Notes
+
+- `client/` contains the React application, offline queueing, local cache, and editor UI.
+- `server/` contains the HTTP API, auth integration, PostgreSQL-backed document services, and websocket collaboration server.
+- `shared/` contains shared event and type contracts used by client and server.
+
+## Offline Behavior
+
+- Cached documents remain readable while offline.
+- Title/content saves queue locally when the network is unavailable.
+- Star toggles also queue locally.
+- On reconnect, queued document saves collapse to the latest change per document before replay.
+- If the server changed while the client was offline, the editor opens a conflict dialog instead of overwriting remote content.
+
+## Workspace Behavior
+
+- The MVP uses one active workspace context at a time.
+- Shared documents are documents in that workspace that the current user can access but does not own.
+- Workspace labels are loaded from backend data with a safe fallback derived from the workspace id.

@@ -5,6 +5,7 @@ import { authRoutes } from "./api/auth.routes.js";
 import { documentRoutes } from "./api/document.routes.js";
 import { presenceRoutes } from "./api/presence.routes.js";
 import { userRoutes } from "./api/user.routes.js";
+import { workspaceRoutes } from "./api/workspace.routes.js";
 import { db } from "./config/db.js";
 import { env } from "./config/env.js";
 import { errorMiddleware } from "./middlewares/error.middleware.js";
@@ -63,6 +64,7 @@ export const createApp = () => {
   app.use("/api/documents", documentRoutes);
   app.use("/api/presence", presenceRoutes);
   app.use("/api/users", userRoutes);
+  app.use("/api/workspaces", workspaceRoutes);
 
   app.use(errorMiddleware);
 

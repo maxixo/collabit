@@ -1,4 +1,13 @@
 import { db } from "../config/db.js";
+import { formatWorkspaceDisplayName } from "./workspace.naming.js";
+
+export type WorkspaceMembershipStatus = "owner" | "member" | "guest";
+
+export type WorkspaceSummary = {
+  id: string;
+  name: string;
+  membershipStatus: WorkspaceMembershipStatus;
+};
 
 type WorkspaceSchemaInfo = {
   hasWorkspaces: boolean;
@@ -199,4 +208,101 @@ export const joinWorkspaceViaShare = async (
   );
 
   return true;
+};
+
+export const getWorkspaceSummary = async (
+  workspaceId: string,
+  userId: string
+): Promise<WorkspaceSummary> => {
+  const normalizedWorkspaceId = workspaceId.trim();
+  if (!normalizedWorkspaceId) {
+    throw new Error("workspaceId is required");
+  }
+
+  const schema = await getWorkspaceSchemaInfo();
+  let name = formatWorkspaceDisplayName(normalizedWorkspaceId);
+  let membershipStatus: WorkspaceMembershipStatus = userId ? "member" : "guest";
+
+  if (schema.hasWorkspaces) {
+    const columns = await loadWorkspaceColumns();
+    const columnNames = new Set(columns.map((column) => column.column_name));
+    const selectParts = ["id"];
+
+    if (columnNames.has("name")) {
+      selectParts.push("name");
+    }
+    if (columnNames.has("title")) {
+      selectParts.push("title");
+    }
+    if (columnNames.has("owner_id")) {
+      selectParts.push("owner_id");
+    }
+    if (columnNames.has("created_by")) {
+      selectParts.push("created_by");
+    }
+    if (columnNames.has("user_id")) {
+      selectParts.push("user_id");
+    }
+
+    const { rows } = await db.query(
+      `
+        SELECT ${selectParts.join(", ")}
+        FROM workspaces
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [normalizedWorkspaceId]
+    );
+
+    if (rows.length > 0) {
+      const row = rows[0] as Record<string, unknown>;
+      const rawName =
+        typeof row.name === "string"
+          ? row.name
+          : typeof row.title === "string"
+            ? row.title
+            : "";
+      if (rawName.trim()) {
+        name = rawName.trim();
+      }
+
+      const ownerId =
+        typeof row.owner_id === "string"
+          ? row.owner_id
+          : typeof row.created_by === "string"
+            ? row.created_by
+            : typeof row.user_id === "string"
+              ? row.user_id
+              : "";
+
+      if (ownerId && ownerId === userId) {
+        membershipStatus = "owner";
+      }
+    }
+  }
+
+  if (schema.hasWorkspaceMembers && userId) {
+    const membershipSelect = schema.workspaceMembersHasRole ? "role" : "'member' AS role";
+    const { rows } = await db.query(
+      `
+        SELECT ${membershipSelect}
+        FROM workspace_members
+        WHERE workspace_id = $1
+          AND user_id = $2
+        LIMIT 1
+      `,
+      [normalizedWorkspaceId, userId]
+    );
+
+    if (rows.length > 0 && membershipStatus !== "owner") {
+      const row = rows[0] as { role?: unknown };
+      membershipStatus = row.role === "owner" ? "owner" : "member";
+    }
+  }
+
+  return {
+    id: normalizedWorkspaceId,
+    name,
+    membershipStatus
+  };
 };

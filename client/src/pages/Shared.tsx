@@ -6,22 +6,23 @@ import { ConfirmationModal } from "../components/ConfirmationModal";
 import { useCreateDocumentAction } from "../hooks/useCreateDocumentAction";
 import { useStarToggle } from "../hooks/useStarToggle";
 import {
-  fetchDocuments,
+  fetchSharedDocuments,
   moveDocumentToTrash,
   type DocumentSummary
 } from "../services/document.service";
 
 const getDocumentTitle = (title: string) => (title.trim() ? title : "Untitled document");
 
-export const Recent = () => {
+export const Shared = () => {
   const { recentDocuments, activeDocumentId, dispatch } = useAppStore();
   const { toggleStar } = useStarToggle();
   const [searchParams] = useSearchParams();
   const workspaceId = searchParams.get("workspaceId")?.trim() || "default";
   const { createNewDocument, isCreating, createError } = useCreateDocumentAction(workspaceId);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [sharedDocuments, setSharedDocuments] = useState<DocumentSummary[]>([]);
   const [pendingTrashDocument, setPendingTrashDocument] = useState<DocumentSummary | null>(null);
-  const showSkeleton = isSyncing && recentDocuments.length === 0;
+  const showSkeleton = isSyncing && sharedDocuments.length === 0;
 
   const homeDocument = useMemo(() => {
     if (activeDocumentId) {
@@ -32,8 +33,8 @@ export const Recent = () => {
         }
       );
     }
-    return recentDocuments[0] ?? null;
-  }, [activeDocumentId, recentDocuments, workspaceId]);
+    return recentDocuments[0] ?? sharedDocuments[0] ?? null;
+  }, [activeDocumentId, recentDocuments, sharedDocuments, workspaceId]);
 
   const homeHref = homeDocument
     ? `/editor/${encodeURIComponent(homeDocument.id)}?workspaceId=${encodeURIComponent(
@@ -43,7 +44,7 @@ export const Recent = () => {
 
   const handleToggleStar = useCallback(
     async (documentId: string) => {
-      const doc = recentDocuments.find((item) => item.id === documentId);
+      const doc = sharedDocuments.find((item) => item.id === documentId);
       if (!doc) {
         return;
       }
@@ -51,10 +52,10 @@ export const Recent = () => {
       try {
         await toggleStar(doc);
       } catch {
-        // The hook reverts optimistic updates on failure.
+        // The hook reverts optimistic changes when the request fails.
       }
     },
-    [recentDocuments, toggleStar]
+    [sharedDocuments, toggleStar]
   );
 
   const handleConfirmMoveToTrash = useCallback(async () => {
@@ -62,10 +63,12 @@ export const Recent = () => {
       return;
     }
 
-    const previousDocuments = recentDocuments;
+    const previousShared = sharedDocuments;
+    const previousRecent = recentDocuments;
+    setSharedDocuments(previousShared.filter((doc) => doc.id !== pendingTrashDocument.id));
     dispatch(
       actions.setRecentDocuments(
-        previousDocuments.filter((doc) => doc.id !== pendingTrashDocument.id)
+        previousRecent.filter((doc) => doc.id !== pendingTrashDocument.id)
       )
     );
     setPendingTrashDocument(null);
@@ -73,19 +76,20 @@ export const Recent = () => {
     try {
       await moveDocumentToTrash(pendingTrashDocument.id, workspaceId);
     } catch {
-      dispatch(actions.setRecentDocuments(previousDocuments));
+      setSharedDocuments(previousShared);
+      dispatch(actions.setRecentDocuments(previousRecent));
     }
-  }, [dispatch, pendingTrashDocument, recentDocuments, workspaceId]);
+  }, [dispatch, pendingTrashDocument, recentDocuments, sharedDocuments, workspaceId]);
 
   useEffect(() => {
     let isActive = true;
 
-    const loadRecentDocuments = async () => {
+    const loadSharedDocuments = async () => {
       setIsSyncing(true);
       try {
-        const docs = await fetchDocuments(workspaceId);
+        const docs = await fetchSharedDocuments(workspaceId);
         if (isActive) {
-          dispatch(actions.setRecentDocuments(docs));
+          setSharedDocuments(docs);
         }
       } finally {
         if (isActive) {
@@ -94,23 +98,23 @@ export const Recent = () => {
       }
     };
 
-    void loadRecentDocuments();
+    void loadSharedDocuments();
 
     return () => {
       isActive = false;
     };
-  }, [workspaceId, dispatch]);
+  }, [workspaceId]);
 
   return (
     <>
       <DashboardLayout
         workspaceId={workspaceId}
-        activeNav="recent"
-        pageTitle="Recent Documents"
-        pageSubtitle="Manage and edit the documents you touched most recently."
+        activeNav="shared"
+        pageTitle="Shared With You"
+        pageSubtitle="Documents you can access in this workspace but do not own."
         homeHref={homeHref}
         isSyncing={isSyncing}
-        syncingLabel="Refreshing your recent documents"
+        syncingLabel="Refreshing shared documents"
         onCreateDocument={() => void createNewDocument()}
         isCreating={isCreating}
         createError={createError}
@@ -119,7 +123,7 @@ export const Recent = () => {
           {showSkeleton ? (
             Array.from({ length: 8 }).map((_, index) => (
               <div
-                key={`recent-skeleton-${index}`}
+                key={`shared-skeleton-${index}`}
                 className="group flex flex-col gap-4 rounded-xl border border-[#e7e7f3] bg-white p-4 dark:border-[#2a2b4a] dark:bg-[#16172d]"
               >
                 <div className="skeleton-shimmer aspect-[4/3] w-full rounded-lg bg-[#e7e7f3] dark:bg-[#1e1f3a]"></div>
@@ -129,8 +133,8 @@ export const Recent = () => {
                 </div>
               </div>
             ))
-          ) : recentDocuments.length > 0 ? (
-            recentDocuments.map((doc) => {
+          ) : sharedDocuments.length > 0 ? (
+            sharedDocuments.map((doc) => {
               const title = getDocumentTitle(doc.title);
               const updatedAtLabel = doc.updatedAt
                 ? new Date(doc.updatedAt).toLocaleDateString()
@@ -183,7 +187,7 @@ export const Recent = () => {
                     </button>
                   </div>
                   <div className="flex aspect-[4/3] w-full items-center justify-center rounded-lg bg-[#e7e7f3] text-[#4c4d9a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9]">
-                    <span className="material-symbols-outlined text-3xl">description</span>
+                    <span className="material-symbols-outlined text-3xl">group</span>
                   </div>
                   <div className="flex flex-col gap-1">
                     <p className="truncate text-sm font-bold text-[#0d0e1b] dark:text-white">{title}</p>
@@ -196,7 +200,7 @@ export const Recent = () => {
             })
           ) : (
             <div className="col-span-full rounded-xl border border-dashed border-[#e7e7f3] p-6 text-center text-sm text-[#4c4d9a] dark:border-[#2a2b4a] dark:text-[#a1a1c9]">
-              No recent documents yet.
+              No shared documents yet in this workspace.
             </div>
           )}
         </div>

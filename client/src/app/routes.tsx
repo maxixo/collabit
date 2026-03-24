@@ -8,6 +8,7 @@ const SignUpPage = lazy(() => import("../pages/SignUp").then((module) => ({ defa
 const EditorPage = lazy(() => import("../pages/Editor").then((module) => ({ default: module.Editor })));
 const RecentPage = lazy(() => import("../pages/Recent").then((module) => ({ default: module.Recent })));
 const StarredPage = lazy(() => import("../pages/Starred").then((module) => ({ default: module.Starred })));
+const SharedPage = lazy(() => import("../pages/Shared").then((module) => ({ default: module.Shared })));
 const TrashPage = lazy(() => import("../pages/Trash").then((module) => ({ default: module.Trash })));
 const ProfilePage = lazy(() => import("../pages/Profile").then((module) => ({ default: module.Profile })));
 
@@ -105,6 +106,12 @@ export const router = createBrowserRouter([
     path: "/editor/starred",
     element: (
       <ProtectedPage page={StarredPage} />
+    )
+  },
+  {
+    path: "/editor/shared",
+    element: (
+      <ProtectedPage page={SharedPage} />
     )
   },
   {
