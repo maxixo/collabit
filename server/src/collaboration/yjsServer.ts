@@ -11,48 +11,57 @@ const messageAwareness = 1;
 const messageAuth = 2;
 const messageQueryAwareness = 3;
 
-/**
- * YJS document manager
- * Maintains Y.Doc instances per document and handles WebSocket connections
- */
+type ClientInfo = {
+  docId: string;
+  userId: string;
+  canWrite: boolean;
+  clientIds: Set<number>;
+};
+
+type AttachOptions = {
+  documentId: string;
+  userId: string;
+  canWrite: boolean;
+};
+
 class YjsDocumentManager {
   private documents = new Map<string, Y.Doc>();
   private awarenessStates = new Map<string, awarenessProtocol.Awareness>();
-  clients = new Map<WebSocket, { docId: string; userId: string; clientIds: Set<number> }>();
+  clients = new Map<WebSocket, ClientInfo>();
 
-  /**
-   * Get or create a Y.Doc for a document
-   */
   getDocument(documentId: string): Y.Doc {
     if (!this.documents.has(documentId)) {
-      logger.info(`[YjsServer] 📄 Creating new Y.Doc for document: ${documentId}`);
       const doc = new Y.Doc();
-      // Ensure the content fragment exists
       doc.getXmlFragment("content");
       doc.on("update", (update: Uint8Array, origin: unknown) => {
-        const originWs = origin instanceof WebSocket ? origin : undefined;
-        const originType = origin instanceof WebSocket ? `WebSocket(${origin.readyState})` : typeof origin;
-        logger.debug(`[YjsServer] 🔄 Document update received for ${documentId}, origin: ${originType}`);
-        this.broadcastUpdate(documentId, update, originWs);
+        const originSocket = origin instanceof WebSocket ? origin : undefined;
+        this.broadcastUpdate(documentId, update, originSocket);
       });
-      this.documents.set(documentId, doc);
+
       const awareness = new awarenessProtocol.Awareness(doc);
       awareness.setLocalState(null);
-      awareness.on("update", ({ added, updated, removed }: { added: Set<number>; updated: Set<number>; removed: Set<number> }, origin: unknown) => {
-        const changed = [...added, ...updated, ...removed];
-        if (changed.length === 0) {
-          return;
+      awareness.on(
+        "update",
+        (
+          { added, updated, removed }: { added: Set<number>; updated: Set<number>; removed: Set<number> },
+          origin: unknown
+        ) => {
+          const changed = [...added, ...updated, ...removed];
+          if (changed.length === 0) {
+            return;
+          }
+
+          const update = awarenessProtocol.encodeAwarenessUpdate(awareness, changed);
+          const originSocket = origin instanceof WebSocket ? origin : undefined;
+          this.broadcastAwareness(documentId, update, originSocket);
         }
-        logger.debug(`[YjsServer] 👥 Awareness update for ${documentId}: added=${added.size}, updated=${updated.size}, removed=${removed.size}`);
-        const update = awarenessProtocol.encodeAwarenessUpdate(awareness, changed);
-        const originWs = origin instanceof WebSocket ? origin : undefined;
-        this.broadcastAwareness(documentId, update, originWs);
-      });
+      );
+
+      this.documents.set(documentId, doc);
       this.awarenessStates.set(documentId, awareness);
-      logger.info(`[YjsServer] ✅ Y.Doc created and initialized for ${documentId}`);
-    } else {
-      logger.debug(`[YjsServer] 📄 Using existing Y.Doc for ${documentId}`);
+      logger.info(`[YjsServer] initialized document ${documentId}`);
     }
+
     return this.documents.get(documentId)!;
   }
 
@@ -61,51 +70,43 @@ class YjsDocumentManager {
     if (awareness) {
       return awareness;
     }
+
     this.getDocument(documentId);
     return this.awarenessStates.get(documentId)!;
   }
 
-  /**
-   * Remove a document (when no clients are connected)
-   */
   removeDocument(documentId: string): void {
     const doc = this.documents.get(documentId);
-    if (doc) {
-      doc.destroy();
-      this.documents.delete(documentId);
-      this.awarenessStates.delete(documentId);
-      logger.info(`Removed Y.Doc for document: ${documentId}`);
+    if (!doc) {
+      return;
     }
+
+    doc.destroy();
+    this.documents.delete(documentId);
+    this.awarenessStates.delete(documentId);
+    logger.info(`[YjsServer] removed document ${documentId}`);
   }
 
-  /**
-   * Register a client connection to a document
-   */
-  registerClient(ws: WebSocket, documentId: string, userId: string): void {
-    this.clients.set(ws, { docId: documentId, userId, clientIds: new Set() });
+  registerClient(ws: WebSocket, documentId: string, userId: string, canWrite: boolean): void {
+    this.clients.set(ws, { docId: documentId, userId, canWrite, clientIds: new Set() });
   }
 
-  /**
-   * Unregister a client connection
-   */
   unregisterClient(ws: WebSocket): void {
     const client = this.clients.get(ws);
-    if (client) {
-      const awareness = this.awarenessStates.get(client.docId);
-      if (awareness && client.clientIds.size > 0) {
-        awarenessProtocol.removeAwarenessStates(
-          awareness,
-          Array.from(client.clientIds),
-          ws
-        );
-      }
-      const doc = this.documents.get(client.docId);
-      if (doc && this.getClientCount(client.docId) === 1) {
-        // This was the last client, remove the document
-        this.removeDocument(client.docId);
-      }
-      this.clients.delete(ws);
+    if (!client) {
+      return;
     }
+
+    const awareness = this.awarenessStates.get(client.docId);
+    if (awareness && client.clientIds.size > 0) {
+      awarenessProtocol.removeAwarenessStates(awareness, Array.from(client.clientIds), ws);
+    }
+
+    if (this.getClientCount(client.docId) === 1) {
+      this.removeDocument(client.docId);
+    }
+
+    this.clients.delete(ws);
   }
 
   trackAwareness(ws: WebSocket, update: Uint8Array): void {
@@ -113,9 +114,10 @@ class YjsDocumentManager {
     if (!client) {
       return;
     }
+
     const decoder = decoding.createDecoder(update);
     const updateCount = decoding.readVarUint(decoder);
-    for (let i = 0; i < updateCount; i++) {
+    for (let index = 0; index < updateCount; index += 1) {
       const clientId = decoding.readVarUint(decoder);
       client.clientIds.add(clientId);
       decoding.readVarUint(decoder);
@@ -123,44 +125,37 @@ class YjsDocumentManager {
     }
   }
 
-  /**
-   * Get the number of clients connected to a document
-   */
   getClientCount(documentId: string): number {
     let count = 0;
     this.clients.forEach((client) => {
       if (client.docId === documentId) {
-        count++;
+        count += 1;
       }
     });
     return count;
   }
 
-  /**
-   * Broadcast a YJS update to all clients of a document
-   */
-  broadcastUpdate(documentId: string, update: Uint8Array, excludeWs?: WebSocket): void {
+  broadcastUpdate(documentId: string, update: Uint8Array, excludeSocket?: WebSocket): void {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, messageSync);
     syncProtocol.writeUpdate(encoder, update);
     const payload = encoding.toUint8Array(encoder);
+
     this.clients.forEach((client, ws) => {
-      if (client.docId === documentId && ws !== excludeWs && ws.readyState === WebSocket.OPEN) {
+      if (client.docId === documentId && ws !== excludeSocket && ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
       }
     });
   }
 
-  /**
-   * Broadcast awareness update to all clients of a document
-   */
-  broadcastAwareness(documentId: string, update: Uint8Array, excludeWs?: WebSocket): void {
+  broadcastAwareness(documentId: string, update: Uint8Array, excludeSocket?: WebSocket): void {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, messageAwareness);
     encoding.writeVarUint8Array(encoder, update);
     const payload = encoding.toUint8Array(encoder);
+
     this.clients.forEach((client, ws) => {
-      if (client.docId === documentId && ws !== excludeWs && ws.readyState === WebSocket.OPEN) {
+      if (client.docId === documentId && ws !== excludeSocket && ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
       }
     });
@@ -169,26 +164,46 @@ class YjsDocumentManager {
 
 const yjsManager = new YjsDocumentManager();
 
-/**
- * Create a YJS WebSocket handler
- */
+const sendPermissionDenied = (ws: WebSocket, reason: string) => {
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, messageAuth);
+  authProtocol.writePermissionDenied(encoder, reason);
+  ws.send(encoding.toUint8Array(encoder));
+};
+
+const toPayload = (data: WebSocket.RawData): Uint8Array | null => {
+  if (typeof data === "string") {
+    return null;
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+
+  if (Array.isArray(data)) {
+    return new Uint8Array(Buffer.concat(data));
+  }
+
+  return new Uint8Array(data);
+};
+
+const getSyncMessageType = (payload: Uint8Array) => {
+  const decoder = decoding.createDecoder(payload);
+  decoding.readVarUint(decoder);
+  return decoding.readVarUint(decoder);
+};
+
 export const createYjsServer = () => {
   return {
-  /**
-   * Attach a WebSocket connection to the YJS server
-   */
-    attach: (ws: WebSocket, documentId: string, userId: string) => {
-      const timestamp = new Date().toISOString();
-      logger.info(`[YjsServer] 🔗 Client connecting: document=${documentId}, user=${userId}, time=${timestamp}`);
-      
+    attach: (ws: WebSocket, { documentId, userId, canWrite }: AttachOptions) => {
       const doc = yjsManager.getDocument(documentId);
       const awareness = yjsManager.getAwareness(documentId);
-      yjsManager.registerClient(ws, documentId, userId);
+      yjsManager.registerClient(ws, documentId, userId, canWrite);
 
-      logger.info(`[YjsServer] 👤 Client registered: userId=${userId}, documentId=${documentId}`);
-      logger.info(`[YjsServer] 📊 Total clients for ${documentId}: ${yjsManager.getClientCount(documentId)}`);
+      logger.info(
+        `[YjsServer] attached user=${userId} document=${documentId} canWrite=${canWrite}`
+      );
 
-      // Send initial document state (sync step 1)
       const encoder = encoding.createEncoder();
       encoding.writeVarUint(encoder, messageSync);
       syncProtocol.writeSyncStep1(encoder, doc);
@@ -207,37 +222,39 @@ export const createYjsServer = () => {
         ws.send(encoding.toUint8Array(awarenessEncoder));
       }
 
-      // Handle incoming messages
       ws.on("message", (data: WebSocket.RawData) => {
-        const msgTimestamp = new Date().toISOString();
+        const payload = toPayload(data);
+        if (!payload) {
+          logger.warn(`[YjsServer] ignored non-binary message for document=${documentId}`);
+          return;
+        }
+
         try {
-          let payload: Uint8Array | null = null;
-          if (typeof data === "string") {
-            logger.warn(`[YjsServer] ⚠️  Received string message, ignoring: ${data}`);
-            return;
-          }
-          if (data instanceof ArrayBuffer) {
-            payload = new Uint8Array(data);
-          } else if (Array.isArray(data)) {
-            payload = new Uint8Array(Buffer.concat(data));
-          } else {
-            payload = new Uint8Array(data);
-          }
           const decoder = decoding.createDecoder(payload);
           const messageType = decoding.readVarUint(decoder);
-          logger.debug(`[YjsServer] 📨 Message received at ${msgTimestamp}: type=${messageType}, userId=${userId}, doc=${documentId}`);
 
           switch (messageType) {
             case messageSync: {
-              logger.debug(`[YjsServer] 🔄 Processing sync message for ${documentId} from ${userId}`);
-              const encoder = encoding.createEncoder();
-              encoding.writeVarUint(encoder, messageSync);
-              syncProtocol.readSyncMessage(decoder, encoder, doc, ws, (error) => {
-                logger.error(`[YjsServer] ❌ Error processing YJS sync message: ${error}`);
+              const syncMessageType = getSyncMessageType(payload);
+              if (
+                !canWrite &&
+                (
+                  syncMessageType === syncProtocol.messageYjsSyncStep2 ||
+                  syncMessageType === syncProtocol.messageYjsUpdate
+                )
+              ) {
+                sendPermissionDenied(ws, "This collaboration session is read-only.");
+                return;
+              }
+
+              const response = encoding.createEncoder();
+              encoding.writeVarUint(response, messageSync);
+              syncProtocol.readSyncMessage(decoder, response, doc, ws, (error) => {
+                logger.error(`[YjsServer] sync error for document=${documentId}:`, error);
               });
-              if (encoding.length(encoder) > 1) {
-                ws.send(encoding.toUint8Array(encoder));
-                logger.debug(`[YjsServer] 📤 Sync response sent to ${userId} for ${documentId}`);
+
+              if (encoding.length(response) > 1) {
+                ws.send(encoding.toUint8Array(response));
               }
               break;
             }
@@ -245,76 +262,60 @@ export const createYjsServer = () => {
             case messageAwareness: {
               const awarenessUpdate = decoding.readVarUint8Array(decoder);
               yjsManager.trackAwareness(ws, awarenessUpdate);
-              const beforeStates = awareness.getStates().size;
               awarenessProtocol.applyAwarenessUpdate(awareness, awarenessUpdate, ws);
-              const afterStates = awareness.getStates().size;
-              logger.debug(`[YjsServer] 👥 Awareness update applied for ${documentId}: states ${beforeStates} → ${afterStates}`);
               break;
             }
 
             case messageQueryAwareness: {
-              const awarenessEncoder = encoding.createEncoder();
-              encoding.writeVarUint(awarenessEncoder, messageAwareness);
+              const response = encoding.createEncoder();
+              encoding.writeVarUint(response, messageAwareness);
               encoding.writeVarUint8Array(
-                awarenessEncoder,
+                response,
                 awarenessProtocol.encodeAwarenessUpdate(
                   awareness,
                   Array.from(awareness.getStates().keys())
                 )
               );
-              ws.send(encoding.toUint8Array(awarenessEncoder));
+              ws.send(encoding.toUint8Array(response));
               break;
             }
 
             case messageAuth: {
-              authProtocol.readAuthMessage(decoder, doc, (_ydoc, reason) => {
-                logger.warn(`YJS auth denied: ${reason}`);
-                const authEncoder = encoding.createEncoder();
-                encoding.writeVarUint(authEncoder, messageAuth);
-                authProtocol.writePermissionDenied(authEncoder, reason);
-                ws.send(encoding.toUint8Array(authEncoder));
+              authProtocol.readAuthMessage(decoder, doc, (_doc, reason) => {
+                logger.warn(`[YjsServer] auth denied for document=${documentId}: ${reason}`);
+                sendPermissionDenied(ws, reason);
               });
               break;
             }
 
             default:
-              logger.warn(`[YjsServer] ⚠️  Unknown YJS message type: ${messageType} from ${userId}`);
+              logger.warn(`[YjsServer] unknown message type=${messageType} document=${documentId}`);
           }
         } catch (error) {
-          logger.error(`[YjsServer] ❌ Error processing YJS message from ${userId} for ${documentId}:`, error);
+          logger.error(`[YjsServer] message handling failed for document=${documentId}:`, error);
         }
       });
 
-      // Handle disconnect
       ws.on("close", () => {
-        const remainingClients = yjsManager.getClientCount(documentId);
-        logger.info(`[YjsServer] 🔌 Client disconnected: document=${documentId}, user=${userId}, remaining=${remainingClients}`);
         yjsManager.unregisterClient(ws);
+        logger.info(`[YjsServer] detached user=${userId} document=${documentId}`);
       });
 
-      // Handle errors
       ws.on("error", (error) => {
-        logger.error(`[YjsServer] ❌ WebSocket error for ${userId} on ${documentId}:`, error);
+        logger.error(`[YjsServer] socket error for document=${documentId}:`, error);
       });
     },
 
-    /**
-     * Force disconnect all clients for a document
-     * Useful when a share token is revoked
-     */
     disconnectDocument: (documentId: string) => {
-      yjsManager.clients.forEach((client: { docId: string }, ws: WebSocket) => {
+      yjsManager.clients.forEach((client, ws) => {
         if (client.docId === documentId) {
           ws.close(1000, "Document access revoked");
           yjsManager.unregisterClient(ws);
         }
       });
-      logger.info(`Disconnected all YJS clients for document: ${documentId}`);
+      logger.info(`[YjsServer] disconnected clients for document=${documentId}`);
     }
   };
 };
 
-/**
- * Get the YJS document manager instance
- */
 export const getYjsManager = () => yjsManager;

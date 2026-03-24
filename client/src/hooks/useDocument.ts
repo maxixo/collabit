@@ -3,13 +3,61 @@ import type { DocumentState } from "../types";
 import { createDocument, fetchDocumentById, updateDocument } from "../services/document.service";
 import { saveDocument as cacheDocument } from "../offline/indexedDb";
 import { indexDocument } from "../offline/searchIndex";
+import {
+  enqueueDocumentUpdate,
+  getQueuedDocumentUpdate,
+  subscribeToDocumentQueue
+} from "../offline/documentQueue";
 import { debounce } from "../utils/debounce";
 import { EMPTY_TIPTAP_DOC, sanitizeTipTapContent } from "../utils/tiptapContent";
 
 const DEFAULT_AUTOSAVE_MS = 1200;
 const EMPTY_CONTENT = EMPTY_TIPTAP_DOC;
 
-export type SaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
+export type SaveStatus =
+  | "idle"
+  | "offline"
+  | "queued"
+  | "syncing"
+  | "saved"
+  | "error"
+  | "conflict";
+
+export type DocumentConflictState = {
+  local: {
+    title: string;
+    content: DocumentState["content"];
+    updatedAt: string;
+  };
+  server: DocumentState;
+};
+
+const isConnectivityError = (error: unknown) => {
+  return error instanceof TypeError || !navigator.onLine;
+};
+
+const toDocumentState = <T extends { content: Record<string, unknown> }>(document: T) => {
+  return {
+    ...document,
+    content: sanitizeTipTapContent(document.content) as DocumentState["content"]
+  };
+};
+
+const applyQueuedDraft = (
+  document: DocumentState,
+  queued: Awaited<ReturnType<typeof getQueuedDocumentUpdate>>
+) => {
+  if (!queued) {
+    return document;
+  }
+
+  return {
+    ...document,
+    title: queued.payload.title,
+    content: sanitizeTipTapContent(queued.payload.content) as DocumentState["content"],
+    updatedAt: queued.payload.updatedAtClient
+  };
+};
 
 export const useDocument = (
   documentId?: string,
@@ -22,11 +70,37 @@ export const useDocument = (
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [accessRole, setAccessRole] = useState<"viewer" | "editor" | "owner" | null>(null);
+  const [conflictState, setConflictState] = useState<DocumentConflictState | null>(null);
   const saveCounterRef = useRef(0);
   const pendingSaveRef = useRef(0);
   const currentDocumentIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lastSyncedDocumentRef = useRef<DocumentState | null>(null);
   const shareToken = options?.shareToken;
+
+  const queueDocumentUpdate = useCallback(
+    async (next: DocumentState, saveId: number) => {
+      if (!documentId || !workspaceId) {
+        return;
+      }
+
+      await enqueueDocumentUpdate({
+        documentId,
+        workspaceId,
+        title: next.title,
+        content: next.content,
+        updatedAtClient: next.updatedAt,
+        baseUpdatedAt: lastSyncedDocumentRef.current?.updatedAt ?? null,
+        shareToken
+      });
+
+      if (pendingSaveRef.current === saveId) {
+        setSaveStatus(navigator.onLine ? "queued" : "offline");
+        setSaveError(null);
+      }
+    },
+    [documentId, shareToken, workspaceId]
+  );
 
   const persistDocument = useCallback(
     async (next: DocumentState, saveId: number) => {
@@ -34,8 +108,13 @@ export const useDocument = (
         return;
       }
 
+      if (!navigator.onLine) {
+        await queueDocumentUpdate(next, saveId);
+        return;
+      }
+
       try {
-        await updateDocument(
+        const updated = await updateDocument(
           {
             id: documentId,
             workspaceId,
@@ -44,21 +123,48 @@ export const useDocument = (
           },
           { signal: abortControllerRef.current?.signal, shareToken }
         );
+
+        const normalized = toDocumentState(updated);
+        lastSyncedDocumentRef.current = normalized;
+
         if (pendingSaveRef.current === saveId) {
+          setDocument((current) => {
+            if (!current || current.id !== normalized.id) {
+              return normalized;
+            }
+
+            return {
+              ...current,
+              title: normalized.title,
+              content: normalized.content,
+              updatedAt: normalized.updatedAt,
+              workspaceId: normalized.workspaceId,
+              ownerId: normalized.ownerId,
+              isStarred: normalized.isStarred,
+              accessRole: current.accessRole ?? normalized.accessRole
+            };
+          });
           setSaveStatus("saved");
           setSaveError(null);
+          setConflictState(null);
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
         }
+
+        if (isConnectivityError(err)) {
+          await queueDocumentUpdate(next, saveId);
+          return;
+        }
+
         if (pendingSaveRef.current === saveId) {
           setSaveStatus("error");
           setSaveError(err instanceof Error ? err.message : "Failed to save document");
         }
       }
     },
-    [documentId, workspaceId, shareToken]
+    [documentId, queueDocumentUpdate, shareToken, workspaceId]
   );
 
   const debouncedPersist = useMemo(() => {
@@ -71,7 +177,7 @@ export const useDocument = (
     return debounce((next: DocumentState) => {
       void indexDocument(next);
     }, DEFAULT_AUTOSAVE_MS);
-  }, [indexDocument]);
+  }, []);
 
   const cancelPendingSave = useCallback(() => {
     debouncedPersist.cancel?.();
@@ -88,10 +194,12 @@ export const useDocument = (
     const nextController = new AbortController();
     abortControllerRef.current = nextController;
     currentDocumentIdRef.current = documentId ?? null;
+    lastSyncedDocumentRef.current = null;
 
     setSaveStatus("idle");
     setSaveError(null);
     setAccessRole(null);
+    setConflictState(null);
     saveCounterRef.current = 0;
     pendingSaveRef.current = 0;
     cancelPendingSave();
@@ -118,7 +226,15 @@ export const useDocument = (
           return;
         }
 
+        let nextDocument: DocumentState;
+
         if (!result) {
+          if (!workspaceId) {
+            setError("workspaceId is required");
+            setLoading(false);
+            return;
+          }
+
           const fallbackTitle = documentId.replace(/-/g, " ");
           const created = await createDocument({
             id: documentId,
@@ -129,25 +245,25 @@ export const useDocument = (
           if (!isMounted) {
             return;
           }
-          const nextDocument = {
-            ...created,
-            content: sanitizeTipTapContent(created.content) as DocumentState["content"]
-          };
+          nextDocument = toDocumentState(created);
           setAccessRole("owner");
-          setDocument(nextDocument);
-          void cacheDocument(nextDocument).catch(() => undefined);
-          void indexDocument(nextDocument);
-          return;
+        } else {
+          nextDocument = toDocumentState(result);
+          setAccessRole(result.accessRole ?? null);
         }
 
-        const nextDocument = {
-          ...result,
-          content: sanitizeTipTapContent(result.content) as DocumentState["content"]
-        };
-        setAccessRole(result.accessRole ?? null);
-        setDocument(nextDocument);
-        void cacheDocument(nextDocument).catch(() => undefined);
-        void indexDocument(nextDocument);
+        lastSyncedDocumentRef.current = nextDocument;
+
+        const queuedDraft = await getQueuedDocumentUpdate(documentId);
+        const hydratedDocument = applyQueuedDraft(nextDocument, queuedDraft);
+
+        setDocument(hydratedDocument);
+        if (queuedDraft) {
+          setSaveStatus(navigator.onLine ? "queued" : "offline");
+        }
+
+        void cacheDocument(hydratedDocument).catch(() => undefined);
+        void indexDocument(hydratedDocument);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
@@ -162,7 +278,7 @@ export const useDocument = (
       }
     };
 
-    loadDocument();
+    void loadDocument();
 
     return () => {
       isMounted = false;
@@ -171,19 +287,112 @@ export const useDocument = (
       }
       cancelPendingSave();
     };
-  }, [documentId, workspaceId, shareToken, cancelPendingSave]);
+  }, [cancelPendingSave, documentId, shareToken, workspaceId]);
+
+  useEffect(() => {
+    if (!documentId) {
+      return;
+    }
+
+    return subscribeToDocumentQueue((event) => {
+      if (event.documentId !== documentId) {
+        return;
+      }
+
+      if (event.status === "queued") {
+        setSaveStatus(navigator.onLine ? "queued" : "offline");
+        setSaveError(null);
+        return;
+      }
+
+      if (event.status === "syncing") {
+        setSaveStatus("syncing");
+        setSaveError(null);
+        return;
+      }
+
+      if (event.status === "saved") {
+        const normalized = toDocumentState(event.document);
+        lastSyncedDocumentRef.current = normalized;
+        setDocument((current) => {
+          if (!current || current.id !== normalized.id) {
+            return normalized;
+          }
+
+          return {
+            ...current,
+            title: normalized.title,
+            content: normalized.content,
+            updatedAt: normalized.updatedAt,
+            workspaceId: normalized.workspaceId,
+            ownerId: normalized.ownerId,
+            isStarred: normalized.isStarred,
+            accessRole: current.accessRole ?? normalized.accessRole
+          };
+        });
+        setConflictState(null);
+        setSaveStatus("saved");
+        setSaveError(null);
+        void cacheDocument(normalized).catch(() => undefined);
+        void indexDocument(normalized);
+        return;
+      }
+
+      if (event.status === "conflict") {
+        setConflictState({
+          local: {
+            title: event.local.title,
+            content: sanitizeTipTapContent(event.local.content) as DocumentState["content"],
+            updatedAt: event.local.updatedAtClient
+          },
+          server: toDocumentState(event.server)
+        });
+        setSaveStatus("conflict");
+        setSaveError(null);
+        return;
+      }
+
+      setSaveStatus("error");
+      setSaveError(event.message);
+    });
+  }, [documentId]);
+
+  useEffect(() => {
+    if (!documentId) {
+      return;
+    }
+
+    const handleNetworkChange = () => {
+      void getQueuedDocumentUpdate(documentId).then((queued) => {
+        if (!queued) {
+          return;
+        }
+
+        setSaveStatus(navigator.onLine ? "queued" : "offline");
+      });
+    };
+
+    window.addEventListener("online", handleNetworkChange);
+    window.addEventListener("offline", handleNetworkChange);
+
+    return () => {
+      window.removeEventListener("online", handleNetworkChange);
+      window.removeEventListener("offline", handleNetworkChange);
+    };
+  }, [documentId]);
 
   const updateDocumentState = useCallback(
     (next: DocumentState) => {
       if (currentDocumentIdRef.current && currentDocumentIdRef.current !== next.id) {
         return;
       }
+
       setDocument(next);
       void cacheDocument(next).catch(() => undefined);
       saveCounterRef.current += 1;
       const saveId = saveCounterRef.current;
       pendingSaveRef.current = saveId;
-      setSaveStatus("saving");
+      setSaveStatus(navigator.onLine ? "syncing" : "offline");
       debouncedPersist(next, saveId);
       debouncedIndexUpdate(next);
     },
@@ -193,9 +402,10 @@ export const useDocument = (
   const setLocalDocument = useCallback(
     (next: DocumentState | ((current: DocumentState | null) => DocumentState | null)) => {
       setDocument((current) => {
-        const resolved = typeof next === "function"
-          ? (next as (value: DocumentState | null) => DocumentState | null)(current)
-          : next;
+        const resolved =
+          typeof next === "function"
+            ? (next as (value: DocumentState | null) => DocumentState | null)(current)
+            : next;
         if (resolved) {
           void cacheDocument(resolved).catch(() => undefined);
         }
@@ -205,6 +415,11 @@ export const useDocument = (
     []
   );
 
+  const clearConflict = useCallback(() => {
+    setConflictState(null);
+    setSaveStatus("saved");
+  }, []);
+
   return {
     document,
     accessRole,
@@ -213,6 +428,8 @@ export const useDocument = (
     loading,
     error,
     saveStatus,
-    saveError
+    saveError,
+    conflictState,
+    clearConflict
   };
 };

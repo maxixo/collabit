@@ -60,7 +60,7 @@ export interface AppContextValue {
   activeDocumentId: string | null;
   recentDocuments: DocumentSummary[];
   connectionStatus: "online" | "offline" | "reconnecting";
-  saveStatus: "saved" | "saving" | "error" | "conflict";
+  saveStatus: "saved" | "saving" | "syncing" | "offline" | "queued" | "error" | "conflict";
   presence: PresenceState;
   pendingChanges: Record<string, PendingChangesSummary[]>;
   dispatch: Dispatch<AppAction>;
@@ -73,7 +73,7 @@ type AppAction =
   | { type: "UPDATE_RECENT_DOCUMENT"; payload: DocumentSummary }
   | { type: "SET_DOCUMENT_STAR"; payload: { id: string; isStarred: boolean } }
   | { type: "SET_CONNECTION_STATUS"; payload: "online" | "offline" | "reconnecting" }
-  | { type: "SET_SAVE_STATUS"; payload: "saved" | "saving" | "error" | "conflict" }
+  | { type: "SET_SAVE_STATUS"; payload: "saved" | "saving" | "syncing" | "offline" | "queued" | "error" | "conflict" }
   | { type: "SET_PRESENCE"; payload: PresenceState }
   | { type: "ADD_COLLABORATOR"; payload: Collaborator }
   | { type: "REMOVE_COLLABORATOR"; payload: string }
@@ -225,7 +225,7 @@ export const actions = {
   updateRecentDocument: (doc: DocumentSummary) => ({ type: "UPDATE_RECENT_DOCUMENT" as const, payload: doc }),
   setDocumentStar: (payload: { id: string; isStarred: boolean }) => ({ type: "SET_DOCUMENT_STAR" as const, payload }),
   setConnectionStatus: (status: "online" | "offline" | "reconnecting") => ({ type: "SET_CONNECTION_STATUS" as const, payload: status }),
-  setSaveStatus: (status: "saved" | "saving" | "error" | "conflict") => ({ type: "SET_SAVE_STATUS" as const, payload: status }),
+  setSaveStatus: (status: "saved" | "saving" | "syncing" | "offline" | "queued" | "error" | "conflict") => ({ type: "SET_SAVE_STATUS" as const, payload: status }),
   setPresence: (presence: PresenceState) => ({ type: "SET_PRESENCE" as const, payload: presence }),
   addCollaborator: (collaborator: Collaborator) => ({ type: "ADD_COLLABORATOR" as const, payload: collaborator }),
   removeCollaborator: (userId: string) => ({ type: "REMOVE_COLLABORATOR" as const, payload: userId }),

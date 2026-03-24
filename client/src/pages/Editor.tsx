@@ -14,9 +14,6 @@ import { searchDocumentsWithFallback } from "../services/search.service";
 import { indexDocument, type SearchResult } from "../offline/searchIndex";
 import { debounce } from "../utils/debounce";
 import { EMPTY_TIPTAP_DOC } from "../utils/tiptapContent";
-import { connectWebSocket, type WebSocketManager } from "../websocket/socket.js";
-import { ClientEvent } from "@shared/events";
-import type { ServerSyncResponsePayload, ServerPresenceBroadcastPayload } from "@shared/types";
 import { subscribeToStarUpdates } from "../utils/starEvents";
 import { ConflictModal } from "../components/ConflictModal";
 import { UserMenu } from "../components/UserMenu";
@@ -80,11 +77,16 @@ export const Editor = () => {
   const { toggleStar } = useStarToggle();
   
   // Document hooks
-  const { document, accessRole, updateDocument, setLocalDocument, loading, error, saveStatus } = useDocument(
-    id,
-    workspaceId,
-    { shareToken: shareToken ?? undefined }
-  );
+  const {
+    document,
+    accessRole,
+    updateDocument,
+    setLocalDocument,
+    loading,
+    error,
+    saveStatus,
+    conflictState
+  } = useDocument(id, workspaceId, { shareToken: shareToken ?? undefined });
   const activeDocument = id ? (document?.id === id ? document : null) : document;
   const documentRef = useRef(activeDocument);
   const updateDocumentRef = useRef(updateDocument);
@@ -186,16 +188,25 @@ export const Editor = () => {
     if (saveStatus === "conflict") {
       dispatch(actions.setSaveStatus("conflict"));
       setShowConflictModal(true);
-      setLocalVersion(documentRef.current?.content as JSONContent ?? EMPTY_TIPTAP_DOC);
-    } else if (saveStatus === "saving") {
-      dispatch(actions.setSaveStatus("saving"));
+      setLocalVersion(
+        conflictState?.local.content as JSONContent ??
+        documentRef.current?.content as JSONContent ??
+        EMPTY_TIPTAP_DOC
+      );
+      setServerVersion(conflictState?.server.content as JSONContent ?? EMPTY_TIPTAP_DOC);
+    } else if (saveStatus === "syncing") {
+      dispatch(actions.setSaveStatus("syncing"));
+    } else if (saveStatus === "offline") {
+      dispatch(actions.setSaveStatus("offline"));
+    } else if (saveStatus === "queued") {
+      dispatch(actions.setSaveStatus("queued"));
     } else if (saveStatus === "error") {
       dispatch(actions.setSaveStatus("error"));
     } else if (saveStatus === "saved") {
       dispatch(actions.setSaveStatus("saved"));
     }
     // Don't sync "idle" state to store - keep previous state
-  }, [saveStatus, dispatch]);
+  }, [conflictState, dispatch, saveStatus]);
   
   // Set active document
   useEffect(() => {
@@ -220,9 +231,38 @@ export const Editor = () => {
   }, [workspaceId, dispatch]);
   
   const displaySaveStatus = saveStatus === "idle" ? globalSaveStatus : saveStatus;
-  const saveLabel = displaySaveStatus === "saving" ? "Saving..." : displaySaveStatus === "error" ? "Error" : displaySaveStatus === "conflict" ? "Conflict" : "Saved";
-  const saveIcon = displaySaveStatus === "saving" ? "cloud_upload" : displaySaveStatus === "error" ? "error" : displaySaveStatus === "conflict" ? "warning" : "cloud_done";
-  const saveClass = displaySaveStatus === "error" || displaySaveStatus === "conflict" ? "text-red-500" : "text-[#4c4d9a]";
+  const saveLabel =
+    displaySaveStatus === "saving"
+      ? "Saving..."
+      : displaySaveStatus === "syncing"
+        ? "Syncing..."
+        : displaySaveStatus === "offline"
+          ? "Offline"
+          : displaySaveStatus === "queued"
+            ? "Queued"
+            : displaySaveStatus === "error"
+              ? "Error"
+              : displaySaveStatus === "conflict"
+                ? "Conflict"
+                : "Saved";
+  const saveIcon =
+    displaySaveStatus === "saving" || displaySaveStatus === "syncing"
+      ? "cloud_upload"
+      : displaySaveStatus === "offline"
+        ? "cloud_off"
+        : displaySaveStatus === "queued"
+          ? "schedule"
+          : displaySaveStatus === "error"
+            ? "error"
+            : displaySaveStatus === "conflict"
+              ? "warning"
+              : "cloud_done";
+  const saveClass =
+    displaySaveStatus === "error" || displaySaveStatus === "conflict"
+      ? "text-red-500"
+      : displaySaveStatus === "offline" || displaySaveStatus === "queued"
+        ? "text-amber-600"
+        : "text-[#4c4d9a]";
 
   useEffect(() => {
     documentRef.current = activeDocument;
@@ -505,15 +545,7 @@ export const Editor = () => {
       delete newState[documentId];
       return newState;
     });
-    
-    // Disconnect WebSocket if connected
-    if (wsManagerRef.current) {
-      wsManagerRef.current.disconnect();
-    }
-    
-    // Clear active room reference
-    activeRoomRef.current = null;
-    
+
     // Clear share token validation error
     setShareValidationError(null);
   }, [documentId]);
@@ -672,91 +704,6 @@ export const Editor = () => {
     };
   }, [showExportMenu]);
 
-  // WebSocket and collaboration state
-  const wsManagerRef = useRef<WebSocketManager | null>(null);
-  const activeRoomRef = useRef<{ documentId: string; workspaceId: string } | null>(null);
-
-  // Initialize WebSocket connection for collaboration
-  useEffect(() => {
-    if (!documentId || !workspaceId || !collaborationEnabled) {
-      activeRoomRef.current = null;
-      if (wsManagerRef.current) {
-        wsManagerRef.current.disconnect();
-      }
-      return;
-    }
-
-    if (
-      activeRoomRef.current &&
-      (activeRoomRef.current.documentId !== documentId ||
-        activeRoomRef.current.workspaceId !== workspaceId)
-    ) {
-      wsManagerRef.current?.disconnect();
-      activeRoomRef.current = null;
-    }
-
-    // Get WebSocket URL from environment or use default (pointing to backend server)
-    const wsUrl = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3000/ws`;
-
-    // Connect to WebSocket with event handlers
-    const manager = connectWebSocket(wsUrl, {
-      onReady: (payload) => {
-        console.log("WebSocket ready:", payload);
-      },
-      onSyncResponse: (payload: ServerSyncResponsePayload) => {
-        if (activeRoomRef.current?.documentId !== payload.document.id) {
-          return;
-        }
-        console.log("Document synced:", payload.document);
-        setServerVersion(payload.document.content as JSONContent);
-      },
-      onPresenceBroadcast: (payload: ServerPresenceBroadcastPayload) => {
-        if (activeRoomRef.current?.documentId !== payload.documentId) {
-          return;
-        }
-        console.log("Presence update:", payload.presence);
-      },
-      onError: (payload) => {
-        console.error("WebSocket error:", payload);
-      }
-    });
-
-    wsManagerRef.current = manager;
-
-    const joinRoom = () => {
-      if (!manager.isConnected()) {
-        return;
-      }
-      manager.send(ClientEvent.DocumentOpen, {
-        documentId,
-        workspaceId
-      });
-      activeRoomRef.current = { documentId, workspaceId };
-    };
-
-    // Join document room when connected
-    let checkConnection: number | null = null;
-    if (manager.isConnected()) {
-      joinRoom();
-    } else {
-      checkConnection = window.setInterval(() => {
-        joinRoom();
-        if (activeRoomRef.current?.documentId === documentId) {
-          if (checkConnection !== null) {
-            clearInterval(checkConnection);
-            checkConnection = null;
-          }
-        }
-      }, 100);
-    }
-
-    return () => {
-      if (checkConnection !== null) {
-        clearInterval(checkConnection);
-      }
-    };
-  }, [documentId, workspaceId, collaborationEnabled]);
-
   useEffect(() => {
     const trimmed = searchQuery.trim();
     if (!trimmed || !workspaceId) {
@@ -781,15 +728,6 @@ export const Editor = () => {
       window.clearTimeout(timeoutId);
     };
   }, [searchQuery, workspaceId]);
-
-  // Cleanup WebSocket on unmount
-  useEffect(() => {
-    return () => {
-      if (wsManagerRef.current) {
-        wsManagerRef.current.disconnect();
-      }
-    };
-  }, []);
 
   return (
     <div className="editor-view bg-background-light text-[#0d0e1b] dark:bg-background-dark dark:text-[#f8f8fc] font-['Inter',_sans-serif]">

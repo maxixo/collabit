@@ -1,159 +1,63 @@
+import { randomUUID } from "crypto";
 import type { IncomingMessage, Server } from "http";
-import { WebSocketServer, WebSocket } from "ws";
-import { registerDocumentSocket } from "./documentSocket.js";
-import { registerPresenceSocket } from "./presenceSocket.js";
+import { WebSocketServer } from "ws";
+import { createYjsServer } from "../collaboration/yjsServer.js";
+import { autoJoinDocumentViaShare, validateDocumentAccessWithShare } from "../services/document.service.js";
+import { canEditDocument } from "../services/permission.service.js";
 import { logger } from "../utils/logger.js";
 import { getSessionUser } from "../middlewares/auth.middleware.js";
-import { presenceManager } from "../collaboration/presenceManager.js";
-import { ServerEvent } from "@shared/events.js";
 
-/**
- * WebSocket connection metadata
- * Stores information about each connected client
- */
-interface SocketMetadata {
-  userId: string;
-  name?: string;
-  image?: string;
-  documentId?: string;
-  workspaceId?: string;
-}
+const yjsServer = createYjsServer();
 
-/**
- * Store metadata for each WebSocket connection
- */
-const socketMetadata = new Map<WebSocket, SocketMetadata>();
-
-/**
- * Initialize the WebSocket server
- * 
- * This sets up a WebSocket server that:
- * 1. Authenticates connections using Better Auth
- * 2. Stores user information with each socket
- * 3. Routes messages to appropriate handlers
- */
-export const initWebSocketServer = (server: Server) => {
-  const wss = new WebSocketServer({
-    server,
-    path: "/ws"
-  });
-
-  presenceManager.setWebSocketBroadcaster((payload) => {
-    const selection = payload.selection
-      ? { anchor: payload.selection.from, head: payload.selection.to }
-      : payload.cursor
-        ? { anchor: payload.cursor.position, head: payload.cursor.position }
-        : null;
-
-    const message = JSON.stringify({
-      type: ServerEvent.PresenceBroadcast,
-      payload: {
-        documentId: payload.documentId,
-        presence: {
-          userId: payload.userId,
-          cursor: null,
-          selection
-        }
-      }
-    });
-
-    wss.clients.forEach((client) => {
-      const metadata = socketMetadata.get(client);
-      if (!metadata || metadata.documentId !== payload.documentId) {
-        return;
-      }
-
-      if (payload.excludeUserId && metadata.userId === payload.excludeUserId) {
-        return;
-      }
-
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
-    });
-  });
-
-  wss.on("connection", async (socket, request) => {
-    try {
-      // Authenticate the WebSocket connection
-      const user = await authenticateSocket(request);
-      if (!user) {
-        socket.send(JSON.stringify({
-          type: "server:error",
-          payload: { message: "Unauthorized: Please sign in" }
-        }));
-        socket.close(1008, "Unauthorized");
-        return;
-      }
-
-      // Store user metadata with this socket
-      socketMetadata.set(socket, {
-        userId: user.id,
-        name: user.name,
-        image: user.image
-      });
-
-      logger.info(`WebSocket connected: ${user.id}`);
-
-      // Register message handlers for this socket
-      registerDocumentSocket(socket, socketMetadata);
-      registerPresenceSocket(socket, socketMetadata, wss);
-
-      // Send ready confirmation to client
-      socket.send(JSON.stringify({
-        type: "server:ready",
-        payload: {
-          serverTime: new Date().toISOString()
-        }
-      }));
-
-      // Handle socket disconnect
-      socket.on("close", () => {
-        const metadata = socketMetadata.get(socket);
-        if (metadata) {
-          logger.info(`WebSocket disconnected: ${metadata.userId}`);
-          
-          // If user was in a document, notify other users
-          if (metadata.documentId) {
-            broadcastPresenceLeave(metadata.documentId, metadata.userId, wss);
-            presenceManager.handleDisconnect(metadata.documentId, metadata.userId);
-          }
-        }
-        socketMetadata.delete(socket);
-      });
-
-      // Handle errors
-      socket.on("error", (error) => {
-        logger.error(`WebSocket error: ${error}`);
-      });
-
-    } catch (error) {
-      logger.error(`WebSocket connection error: ${error}`);
-      socket.close(1011, "Internal Server Error");
-    }
-  });
-
-  logger.info("WebSocket server initialized on path /ws");
-
-  return wss;
+type ParsedConnection = {
+  documentId: string;
+  shareToken?: string;
 };
 
-/**
- * Authenticate a WebSocket connection
- * Uses the same authentication as HTTP requests
- */
+type SocketUser = Awaited<ReturnType<typeof authenticateSocket>>;
+
+const parseConnection = (request: IncomingMessage): ParsedConnection | null => {
+  const hostHeader = request.headers.host ?? "localhost";
+  const url = new URL(request.url ?? "", `http://${hostHeader}`);
+  const segments = url.pathname.split("/").filter(Boolean);
+
+  if (segments[0] !== "ws") {
+    return null;
+  }
+
+  const documentId = decodeURIComponent(
+    segments[1] ?? url.searchParams.get("documentId") ?? ""
+  ).trim();
+  const shareToken = (
+    url.searchParams.get("token") ??
+    url.searchParams.get("shareToken") ??
+    ""
+  ).trim();
+
+  return {
+    documentId,
+    shareToken: shareToken || undefined
+  };
+};
+
+const closeUnauthorized = (reason: string, socket: import("ws").WebSocket) => {
+  socket.close(1008, reason);
+};
+
+const getConnectionUserId = (user: NonNullable<SocketUser>) => user.id;
+
+const getGuestUserId = () => `guest:${randomUUID()}`;
+
 const authenticateSocket = async (request: IncomingMessage) => {
   try {
     const cookieHeader = request.headers.cookie;
     const hostHeader = request.headers.host;
     const forwardedProto = request.headers["x-forwarded-proto"];
+    const defaultProtocol = (request.socket as { encrypted?: boolean }).encrypted ? "https" : "http";
     const protocol = Array.isArray(forwardedProto)
       ? forwardedProto[0]
-      : forwardedProto ?? (request.socket as { encrypted?: boolean }).encrypted
-        ? "https"
-        : "http";
+      : forwardedProto ?? defaultProtocol;
 
-    // Create a minimal Express-like request object for auth middleware
     const fakeRequest = {
       protocol,
       get: (name: string) => {
@@ -170,40 +74,92 @@ const authenticateSocket = async (request: IncomingMessage) => {
       }
     };
 
-    const user = await getSessionUser(fakeRequest as any);
-    return user;
+    return await getSessionUser(fakeRequest as any);
   } catch (error) {
-    logger.error(`WebSocket authentication error: ${error}`);
+    logger.error(`[WebSocket] authentication failed: ${error}`);
     return null;
   }
 };
 
-/**
- * Broadcast a presence leave message to all users in a document
- */
-const broadcastPresenceLeave = (
-  documentId: string,
-  userId: string,
-  wss: WebSocketServer
+const authorizeConnection = async (
+  request: IncomingMessage,
+  user: SocketUser
 ) => {
-  const message = JSON.stringify({
-    type: "server:presence_broadcast",
-    payload: {
-      documentId,
-      presence: {
-        userId,
-        cursor: null,
-        selection: null
+  const parsed = parseConnection(request);
+  if (!parsed || !parsed.documentId) {
+    return { ok: false as const, reason: "documentId is required" };
+  }
+
+  const access = await validateDocumentAccessWithShare(
+    parsed.documentId,
+    user?.id ?? "",
+    parsed.shareToken
+  );
+
+  if (!access.allowed) {
+    if (access.reason === "not_found") {
+      return { ok: false as const, reason: "Document not found" };
+    }
+
+    if (access.reason === "share_invalid") {
+      return { ok: false as const, reason: "Invalid or expired share token" };
+    }
+
+    return { ok: false as const, reason: "Access denied" };
+  }
+
+  return {
+    ok: true as const,
+    documentId: parsed.documentId,
+    shareToken: parsed.shareToken,
+    access
+  };
+};
+
+export const initWebSocketServer = (server: Server) => {
+  const wss = new WebSocketServer({ server });
+
+  wss.on("connection", async (socket, request) => {
+    try {
+      const parsed = parseConnection(request);
+      if (!parsed) {
+        closeUnauthorized("Unsupported websocket path", socket);
+        return;
       }
+
+      const user = await authenticateSocket(request);
+      const authorization = await authorizeConnection(request, user);
+      if (!authorization.ok) {
+        closeUnauthorized(authorization.reason, socket);
+        return;
+      }
+
+      const userId = user ? getConnectionUserId(user) : getGuestUserId();
+      if (user && authorization.access.source === "share" && authorization.access.shareToken) {
+        await autoJoinDocumentViaShare(
+          authorization.documentId,
+          user.id,
+          authorization.access.shareToken.token,
+          authorization.access.shareToken.permissionLevel
+        );
+      }
+
+      yjsServer.attach(socket, {
+        documentId: authorization.documentId,
+        userId,
+        canWrite: canEditDocument(authorization.access.role)
+      });
+
+      logger.info(
+        `[WebSocket] connected document=${authorization.documentId} user=${userId} role=${authorization.access.role}`
+      );
+    } catch (error) {
+      logger.error(`[WebSocket] connection failed: ${error}`);
+      socket.close(1011, "Internal Server Error");
     }
   });
 
-  wss.clients.forEach((client) => {
-    const metadata = socketMetadata.get(client);
-    if (metadata && metadata.documentId === documentId && metadata.userId !== userId) {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
-    }
-  });
+  logger.info("WebSocket server initialized");
+
+  return wss;
 };
