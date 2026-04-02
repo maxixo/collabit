@@ -91,8 +91,11 @@ export const EditorSurface = ({
   const onCursorUpdateRef = useRef(onCursorUpdate);
   const onSelectionUpdateRef = useRef(onSelectionUpdate);
   const { user: authUser, status: authStatus } = useAuth();
-  const [isEmpty, setIsEmpty] = useState(true);
+  const [isLinkEditorOpen, setIsLinkEditorOpen] = useState(false);
+  const [linkDraft, setLinkDraft] = useState("");
   const didAutoFocusRef = useRef(false);
+  const linkEditorRef = useRef<HTMLDivElement | null>(null);
+  const linkInputRef = useRef<HTMLInputElement | null>(null);
   const [providerState, setProviderState] = useState<ProviderState | null>(null);
   const provider =
     providerState && providerState.documentId === documentId ? providerState.provider : null;
@@ -169,6 +172,11 @@ export const EditorSurface = ({
   }, [documentId]);
 
   useEffect(() => {
+    setIsLinkEditorOpen(false);
+    setLinkDraft("");
+  }, [documentId]);
+
+  useEffect(() => {
     if (!documentId || !collaborationEnabled) {
       setProviderState(null);
       return;
@@ -201,7 +209,6 @@ export const EditorSurface = ({
 
   useEffect(() => {
     lastHydratedKey.current = null;
-    setIsEmpty(true);
   }, [documentId]);
 
   const updateStats = useCallback(
@@ -209,7 +216,6 @@ export const EditorSurface = ({
       const bodyStats = getTextStats(editorInstance.getText());
       const titleStats = getTextStats(docTitle);
       onStatsChangeRef.current?.(mergeStats(bodyStats, titleStats));
-      setIsEmpty(editorInstance.isEmpty);
     },
     [docTitle]
   );
@@ -369,28 +375,120 @@ export const EditorSurface = ({
       return;
     }
     const previousUrl = safeEditor.getAttributes("link").href as string | undefined;
-    const nextUrl = window.prompt("Enter URL", previousUrl ?? "");
+    setLinkDraft(previousUrl ?? "");
+    setIsLinkEditorOpen(true);
+  }, [safeEditor]);
 
-    if (nextUrl === null) {
+  const handleLinkSubmit = useCallback(() => {
+    if (!safeEditor) {
       return;
     }
 
-    const trimmed = nextUrl.trim();
+    const trimmed = linkDraft.trim();
     if (!trimmed) {
       safeEditor.chain().focus().extendMarkRange("link").unsetMark("link").run();
+      setIsLinkEditorOpen(false);
       return;
     }
 
     safeEditor.chain().focus().extendMarkRange("link").setMark("link", { href: trimmed }).run();
+    setIsLinkEditorOpen(false);
+  }, [linkDraft, safeEditor]);
+
+  const handleLinkRemove = useCallback(() => {
+    if (!safeEditor) {
+      return;
+    }
+    safeEditor.chain().focus().extendMarkRange("link").unsetMark("link").run();
+    setLinkDraft("");
+    setIsLinkEditorOpen(false);
   }, [safeEditor]);
 
-  const showEmptyHint = editable && !loading && !error && isEmpty;
+  useEffect(() => {
+    if (!isLinkEditorOpen) {
+      return;
+    }
+
+    linkInputRef.current?.focus();
+    linkInputRef.current?.select();
+  }, [isLinkEditorOpen]);
+
+  useEffect(() => {
+    if (!isLinkEditorOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!linkEditorRef.current?.contains(event.target as Node)) {
+        setIsLinkEditorOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [isLinkEditorOpen]);
 
   return (
     <>
       <div className="pointer-events-none sticky top-6 z-30 flex justify-center">
         <div className="pointer-events-auto">
-          <Toolbar editor={safeEditor} />
+          <div className="relative">
+            <Toolbar editor={safeEditor} onRequestLink={handleSetLink} />
+            {isLinkEditorOpen ? (
+              <div
+                ref={linkEditorRef}
+                className="absolute left-0 top-full z-40 mt-3 flex w-[320px] flex-col gap-3 rounded-xl border border-[#e7e7f3] bg-white p-3 shadow-2xl"
+              >
+                <label className="text-xs font-semibold uppercase tracking-[0.18em] text-[#4c4d9a]" htmlFor="editor-link-input">
+                  Link URL
+                </label>
+                <input
+                  id="editor-link-input"
+                  ref={linkInputRef}
+                  className="w-full rounded-lg border border-[#d8d9ef] px-3 py-2 text-sm text-[#0d0e1b] outline-none transition focus:border-[#6163f5] focus:ring-2 focus:ring-[#6163f5]/20"
+                  value={linkDraft}
+                  placeholder="https://example.com"
+                  onChange={(event) => setLinkDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleLinkSubmit();
+                    }
+
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setIsLinkEditorOpen(false);
+                    }
+                  }}
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-2 text-sm font-medium text-[#4c4d9a] transition hover:bg-[#eef0fb]"
+                    onClick={() => setIsLinkEditorOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-2 text-sm font-medium text-[#7a2330] transition hover:bg-[#fdecee]"
+                    onClick={handleLinkRemove}
+                  >
+                    Remove
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-[#6163f5] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#4d50db]"
+                    onClick={handleLinkSubmit}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -446,6 +544,39 @@ export const EditorSurface = ({
               <button
                 type="button"
                 className={`rounded px-2 py-1 text-sm font-semibold transition-colors ${
+                  safeEditor.isActive("underline")
+                    ? "bg-[#0d0e1b] text-white"
+                    : "text-[#0d0e1b] hover:bg-[#e7e7f3]"
+                }`}
+                onClick={() => safeEditor.chain().focus().toggleUnderline().run()}
+              >
+                U
+              </button>
+              <button
+                type="button"
+                className={`rounded px-2 py-1 text-sm font-semibold transition-colors ${
+                  safeEditor.isActive("highlight")
+                    ? "bg-[#0d0e1b] text-white"
+                    : "text-[#0d0e1b] hover:bg-[#e7e7f3]"
+                }`}
+                onClick={() => safeEditor.chain().focus().toggleHighlight().run()}
+              >
+                Mark
+              </button>
+              <button
+                type="button"
+                className={`rounded px-2 py-1 text-sm font-semibold transition-colors ${
+                  safeEditor.isActive("code")
+                    ? "bg-[#0d0e1b] text-white"
+                    : "text-[#0d0e1b] hover:bg-[#e7e7f3]"
+                }`}
+                onClick={() => safeEditor.chain().focus().toggleCode().run()}
+              >
+                Code
+              </button>
+              <button
+                type="button"
+                className={`rounded px-2 py-1 text-sm font-semibold transition-colors ${
                   safeEditor.isActive("link")
                     ? "bg-[#0d0e1b] text-white"
                     : "text-[#0d0e1b] hover:bg-[#e7e7f3]"
@@ -454,6 +585,15 @@ export const EditorSurface = ({
               >
                 Link
               </button>
+              {safeEditor.isActive("link") ? (
+                <button
+                  type="button"
+                  className="rounded px-2 py-1 text-sm font-semibold text-[#0d0e1b] transition-colors hover:bg-[#e7e7f3]"
+                  onClick={handleLinkRemove}
+                >
+                  Unlink
+                </button>
+              ) : null}
             </BubbleMenuPortal>
           ) : null}
           {loading ? (
@@ -463,13 +603,6 @@ export const EditorSurface = ({
           ) : safeEditor && documentId ? (
             <div className="relative">
               <EditorContent editor={safeEditor} className="tiptap text-lg leading-relaxed" />
-              <div
-                className={`pointer-events-none absolute left-0 top-0 text-lg text-[#8a8bbd] transition-opacity duration-200 ${
-                  showEmptyHint ? "opacity-70" : "opacity-0"
-                }`}
-              >
-                Start typing...
-              </div>
             </div>
           ) : null}
         </article>

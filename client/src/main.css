@@ -296,14 +296,133 @@ body {
   outline: none;
 }
 
+.tiptap .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #8a8bbd;
+  pointer-events: none;
+  height: 0;
+}
+
 .tiptap p {
   margin: 0 0 1rem;
+}
+
+.tiptap h1,
+.tiptap h2,
+.tiptap h3 {
+  margin: 0 0 1rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.tiptap h1 {
+  font-size: 2rem;
+}
+
+.tiptap h2 {
+  font-size: 1.6rem;
+}
+
+.tiptap h3 {
+  font-size: 1.3rem;
 }
 
 .tiptap ul,
 .tiptap ol {
   margin: 0 0 1rem;
   padding-left: 1.25rem;
+}
+
+.tiptap ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.tiptap ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.tiptap ul[data-type="taskList"] li > label {
+  margin-top: 0.15rem;
+}
+
+.tiptap blockquote {
+  margin: 0 0 1rem;
+  border-left: 4px solid #d6daf6;
+  padding-left: 1rem;
+  color: #4c4d9a;
+}
+
+.tiptap pre {
+  margin: 0 0 1rem;
+  overflow-x: auto;
+  border-radius: 14px;
+  background: #111827;
+  padding: 1rem 1.25rem;
+  color: #eef2ff;
+}
+
+.tiptap code {
+  border-radius: 0.35rem;
+  background: #eef0fb;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.92em;
+}
+
+.tiptap pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.tiptap mark {
+  border-radius: 0.35rem;
+  background: #fff0a8;
+  padding: 0.05rem 0.2rem;
+}
+
+.tiptap hr {
+  margin: 2rem 0;
+  border: 0;
+  border-top: 1px solid #d8d9ef;
+}
+
+.tiptap table {
+  margin: 1.5rem 0;
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  overflow: hidden;
+}
+
+.tiptap table td,
+.tiptap table th {
+  position: relative;
+  min-width: 1em;
+  border: 1px solid #d8d9ef;
+  padding: 0.75rem;
+  vertical-align: top;
+}
+
+.tiptap table th {
+  background: #f6f7fd;
+  font-weight: 700;
+  text-align: left;
+}
+
+.tiptap .selectedCell::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(97, 99, 245, 0.12);
+}
+
+.tiptap .tableWrapper {
+  overflow-x: auto;
 }
 
 /* Keep primary text accents light while making primary-filled controls darker. */
