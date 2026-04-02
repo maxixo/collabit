@@ -53,6 +53,7 @@ type EditorSurfaceProps = {
   content: JSONContent;
   contentVersion?: number;
   editable: boolean;
+  hideToolbar?: boolean;
   onChange: (content: JSONContent) => void;
   docTitle: string;
   onTitleChange: (title: string) => void;
@@ -72,6 +73,7 @@ export const EditorSurface = ({
   content,
   contentVersion = 0,
   editable,
+  hideToolbar = false,
   onChange,
   onTitleChange,
   onStatsChange,
@@ -430,13 +432,19 @@ export const EditorSurface = ({
     };
   }, [isLinkEditorOpen]);
 
+  useEffect(() => {
+    if (hideToolbar) {
+      setIsLinkEditorOpen(false);
+    }
+  }, [hideToolbar]);
+
   return (
     <>
       <div className="pointer-events-none sticky top-6 z-30 flex justify-center">
         <div className="pointer-events-auto">
           <div className="relative">
-            <Toolbar editor={safeEditor} onRequestLink={handleSetLink} />
-            {isLinkEditorOpen ? (
+            {!hideToolbar ? <Toolbar editor={safeEditor} onRequestLink={handleSetLink} /> : null}
+            {!hideToolbar && isLinkEditorOpen ? (
               <div
                 ref={linkEditorRef}
                 className="absolute left-0 top-full z-40 mt-3 flex w-[320px] flex-col gap-3 rounded-xl border border-[#e7e7f3] bg-white p-3 shadow-2xl"

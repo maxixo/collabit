@@ -1014,11 +1014,11 @@ export const Editor = () => {
                     <span className="material-symbols-outlined !text-[18px]">expand_more</span>
                   </button>
                   {showExportMenu && (
-                    <div
-                      className="absolute right-0 top-11 z-30 w-52 rounded-lg border border-[#e7e7f3] bg-white p-1.5 shadow-xl dark:border-[#2d2e4a] dark:bg-[#16172d]"
-                      role="menu"
-                      aria-label="Export options"
-                    >
+                     <div
+                       className="absolute right-0 top-11 z-50 w-52 rounded-lg border border-[#e7e7f3] bg-white p-1.5 shadow-xl dark:border-[#2d2e4a] dark:bg-[#16172d]"
+                       role="menu"
+                       aria-label="Export options"
+                     >
                       <button
                         className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-[#0d0e1b] transition-colors hover:bg-[#f3f4ff] disabled:cursor-not-allowed disabled:opacity-60 dark:text-white dark:hover:bg-[#1c1d3a]"
                         type="button"
@@ -1140,6 +1140,7 @@ export const Editor = () => {
               onCursorUpdate={sendCursorUpdate}
               onSelectionUpdate={sendSelectionUpdate}
               collaborationEnabled={collaborationEnabled}
+              hideToolbar={showExportMenu}
               autoFocusTitle={shouldFocusTitle}
               docTitle={docTitle}
               loading={effectiveLoading}

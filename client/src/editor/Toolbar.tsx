@@ -6,9 +6,13 @@ type ToolbarProps = {
   onRequestLink?: () => void;
 };
 
+type ToolbarButtonIcon =
+  | { type: "icon"; value: string }
+  | { type: "text"; value: string };
+
 type ToolbarButtonProps = {
   editor: Editor | null;
-  icon: string;
+  icon: ToolbarButtonIcon;
   label: string;
   active?: boolean;
   disabled?: boolean;
@@ -29,19 +33,27 @@ const buttonClassName = (active: boolean, disabled: boolean) => {
   return `${base} text-[#4c4d9a] hover:bg-background-light hover:text-primary dark:text-[#8a8bbd] dark:hover:bg-primary/20`;
 };
 
-const ToolbarButton = ({ editor, icon, label, active = false, disabled = false, onClick }: ToolbarButtonProps) => (
-  <button
-    className={buttonClassName(active, disabled || !editor)}
-    type="button"
-    disabled={disabled || !editor}
-    aria-label={label}
-    title={label}
-    aria-pressed={active}
-    onClick={onClick}
-  >
-    <span className="material-symbols-outlined text-[20px]">{icon}</span>
-  </button>
-);
+const ToolbarButton = ({ editor, icon, label, active = false, disabled = false, onClick }: ToolbarButtonProps) => {
+  const isDisabled = disabled || !editor;
+
+  return (
+    <button
+      className={buttonClassName(active, isDisabled)}
+      type="button"
+      disabled={isDisabled}
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      {icon.type === "icon" ? (
+        <span className="material-symbols-outlined text-[20px]">{icon.value}</span>
+      ) : (
+        <span className="text-xs font-semibold tracking-[0.08em]">{icon.value}</span>
+      )}
+    </button>
+  );
+};
 
 const Divider = () => <div className="mx-1 h-6 w-px bg-[#e7e7f3] dark:bg-[#2d2e4a]"></div>;
 
@@ -50,61 +62,67 @@ export const Toolbar = ({ editor, className, onRequestLink }: ToolbarProps) => {
     ? `flex flex-wrap items-center gap-1 rounded-xl border border-[#e7e7f3] bg-white p-2 shadow-xl dark:border-[#2d2e4a] dark:bg-[#1c1d3a] ${className}`
     : "flex flex-wrap items-center gap-1 rounded-xl border border-[#e7e7f3] bg-white p-2 shadow-xl dark:border-[#2d2e4a] dark:bg-[#1c1d3a]";
 
-  const can = editor?.can().chain().focus();
+  const canRun = (command: (chain: ReturnType<Editor["can"]>["chain"]) => { run: () => boolean }) => {
+    if (!editor) {
+      return false;
+    }
+
+    return command(editor.can().chain().focus()).run();
+  };
 
   return (
     <div className={containerClassName}>
       <ToolbarButton
         editor={editor}
-        icon="format_bold"
+        icon={{ type: "icon", value: "format_bold" }}
         label="Bold"
         active={Boolean(editor?.isActive("bold"))}
-        disabled={!can?.toggleBold().run()}
+        disabled={!canRun((chain) => chain.toggleBold())}
         onClick={() => editor?.chain().focus().toggleBold().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_italic"
+        icon={{ type: "icon", value: "format_italic" }}
         label="Italic"
         active={Boolean(editor?.isActive("italic"))}
-        disabled={!can?.toggleItalic().run()}
+        disabled={!canRun((chain) => chain.toggleItalic())}
         onClick={() => editor?.chain().focus().toggleItalic().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_underlined"
+        icon={{ type: "icon", value: "format_underlined" }}
         label="Underline"
         active={Boolean(editor?.isActive("underline"))}
-        disabled={!can?.toggleUnderline().run()}
+        disabled={!canRun((chain) => chain.toggleUnderline())}
         onClick={() => editor?.chain().focus().toggleUnderline().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_strikethrough"
+        icon={{ type: "icon", value: "format_strikethrough" }}
         label="Strikethrough"
         active={Boolean(editor?.isActive("strike"))}
-        disabled={!can?.toggleStrike().run()}
+        disabled={!canRun((chain) => chain.toggleStrike())}
         onClick={() => editor?.chain().focus().toggleStrike().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="ink_highlighter"
+        icon={{ type: "icon", value: "ink_highlighter" }}
         label="Highlight"
         active={Boolean(editor?.isActive("highlight"))}
-        disabled={!can?.toggleHighlight().run()}
+        disabled={!canRun((chain) => chain.toggleHighlight())}
         onClick={() => editor?.chain().focus().toggleHighlight().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="code"
+        icon={{ type: "icon", value: "code" }}
         label="Inline code"
         active={Boolean(editor?.isActive("code"))}
-        disabled={!can?.toggleCode().run()}
+        disabled={!canRun((chain) => chain.toggleCode())}
         onClick={() => editor?.chain().focus().toggleCode().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="link"
+        icon={{ type: "icon", value: "link" }}
         label="Link"
         active={Boolean(editor?.isActive("link"))}
         disabled={!editor}
@@ -115,50 +133,50 @@ export const Toolbar = ({ editor, className, onRequestLink }: ToolbarProps) => {
 
       <ToolbarButton
         editor={editor}
-        icon="text_fields"
+        icon={{ type: "text", value: "P" }}
         label="Paragraph"
         active={Boolean(editor?.isActive("paragraph"))}
-        disabled={!can?.setParagraph().run()}
+        disabled={!canRun((chain) => chain.setParagraph())}
         onClick={() => editor?.chain().focus().setParagraph().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_h1"
+        icon={{ type: "text", value: "H1" }}
         label="Heading 1"
         active={Boolean(editor?.isActive("heading", { level: 1 }))}
-        disabled={!can?.toggleHeading({ level: 1 }).run()}
+        disabled={!canRun((chain) => chain.toggleHeading({ level: 1 }))}
         onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_h2"
+        icon={{ type: "text", value: "H2" }}
         label="Heading 2"
         active={Boolean(editor?.isActive("heading", { level: 2 }))}
-        disabled={!can?.toggleHeading({ level: 2 }).run()}
+        disabled={!canRun((chain) => chain.toggleHeading({ level: 2 }))}
         onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_h3"
+        icon={{ type: "text", value: "H3" }}
         label="Heading 3"
         active={Boolean(editor?.isActive("heading", { level: 3 }))}
-        disabled={!can?.toggleHeading({ level: 3 }).run()}
+        disabled={!canRun((chain) => chain.toggleHeading({ level: 3 }))}
         onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_quote"
+        icon={{ type: "icon", value: "format_quote" }}
         label="Blockquote"
         active={Boolean(editor?.isActive("blockquote"))}
-        disabled={!can?.toggleBlockquote().run()}
+        disabled={!canRun((chain) => chain.toggleBlockquote())}
         onClick={() => editor?.chain().focus().toggleBlockquote().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="code_blocks"
+        icon={{ type: "icon", value: "code" }}
         label="Code block"
         active={Boolean(editor?.isActive("codeBlock"))}
-        disabled={!can?.toggleCodeBlock().run()}
+        disabled={!canRun((chain) => chain.toggleCodeBlock())}
         onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
       />
 
@@ -166,26 +184,26 @@ export const Toolbar = ({ editor, className, onRequestLink }: ToolbarProps) => {
 
       <ToolbarButton
         editor={editor}
-        icon="format_list_bulleted"
+        icon={{ type: "icon", value: "format_list_bulleted" }}
         label="Bullet list"
         active={Boolean(editor?.isActive("bulletList"))}
-        disabled={!can?.toggleBulletList().run()}
+        disabled={!canRun((chain) => chain.toggleBulletList())}
         onClick={() => editor?.chain().focus().toggleBulletList().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_list_numbered"
+        icon={{ type: "icon", value: "format_list_numbered" }}
         label="Numbered list"
         active={Boolean(editor?.isActive("orderedList"))}
-        disabled={!can?.toggleOrderedList().run()}
+        disabled={!canRun((chain) => chain.toggleOrderedList())}
         onClick={() => editor?.chain().focus().toggleOrderedList().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="checklist"
+        icon={{ type: "icon", value: "checklist" }}
         label="Task list"
         active={Boolean(editor?.isActive("taskList"))}
-        disabled={!can?.toggleTaskList().run()}
+        disabled={!canRun((chain) => chain.toggleTaskList())}
         onClick={() => editor?.chain().focus().toggleTaskList().run()}
       />
 
@@ -193,34 +211,34 @@ export const Toolbar = ({ editor, className, onRequestLink }: ToolbarProps) => {
 
       <ToolbarButton
         editor={editor}
-        icon="format_align_left"
+        icon={{ type: "icon", value: "format_align_left" }}
         label="Align left"
         active={editor?.isActive({ textAlign: "left" }) ?? false}
-        disabled={!can?.setTextAlign("left").run()}
+        disabled={!canRun((chain) => chain.setTextAlign("left"))}
         onClick={() => editor?.chain().focus().setTextAlign("left").run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_align_center"
+        icon={{ type: "icon", value: "format_align_center" }}
         label="Align center"
         active={editor?.isActive({ textAlign: "center" }) ?? false}
-        disabled={!can?.setTextAlign("center").run()}
+        disabled={!canRun((chain) => chain.setTextAlign("center"))}
         onClick={() => editor?.chain().focus().setTextAlign("center").run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_align_right"
+        icon={{ type: "icon", value: "format_align_right" }}
         label="Align right"
         active={editor?.isActive({ textAlign: "right" }) ?? false}
-        disabled={!can?.setTextAlign("right").run()}
+        disabled={!canRun((chain) => chain.setTextAlign("right"))}
         onClick={() => editor?.chain().focus().setTextAlign("right").run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="format_align_justify"
+        icon={{ type: "icon", value: "format_align_justify" }}
         label="Justify"
         active={editor?.isActive({ textAlign: "justify" }) ?? false}
-        disabled={!can?.setTextAlign("justify").run()}
+        disabled={!canRun((chain) => chain.setTextAlign("justify"))}
         onClick={() => editor?.chain().focus().setTextAlign("justify").run()}
       />
 
@@ -228,38 +246,38 @@ export const Toolbar = ({ editor, className, onRequestLink }: ToolbarProps) => {
 
       <ToolbarButton
         editor={editor}
-        icon="horizontal_rule"
+        icon={{ type: "icon", value: "horizontal_rule" }}
         label="Horizontal rule"
-        disabled={!can?.setHorizontalRule().run()}
+        disabled={!canRun((chain) => chain.setHorizontalRule())}
         onClick={() => editor?.chain().focus().setHorizontalRule().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="table"
+        icon={{ type: "icon", value: "table" }}
         label="Insert table"
         active={Boolean(editor?.isActive("table"))}
-        disabled={!can?.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+        disabled={!canRun((chain) => chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }))}
         onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="add_row_below"
+        icon={{ type: "icon", value: "add_row_below" }}
         label="Add row"
-        disabled={!can?.addRowAfter().run()}
+        disabled={!canRun((chain) => chain.addRowAfter())}
         onClick={() => editor?.chain().focus().addRowAfter().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="add_column_right"
+        icon={{ type: "icon", value: "add_column_right" }}
         label="Add column"
-        disabled={!can?.addColumnAfter().run()}
+        disabled={!canRun((chain) => chain.addColumnAfter())}
         onClick={() => editor?.chain().focus().addColumnAfter().run()}
       />
       <ToolbarButton
         editor={editor}
-        icon="delete"
+        icon={{ type: "icon", value: "delete" }}
         label="Delete table"
-        disabled={!can?.deleteTable().run()}
+        disabled={!canRun((chain) => chain.deleteTable())}
         onClick={() => editor?.chain().focus().deleteTable().run()}
       />
     </div>
