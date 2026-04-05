@@ -10,6 +10,7 @@ import { joinDocument, leaveDocument } from "../services/presence.service";
 import { debounce } from "../utils/debounce";
 import { EMPTY_TIPTAP_DOC, sanitizeTipTapContent } from "../utils/tiptapContent";
 import { BubbleMenuPortal } from "./BubbleMenuPortal";
+import { ensureTrailingParagraphAfterSelectionBlock, PERSISTENT_BLOCK_NAMES } from "./extensions/blockExit";
 
 const CURSOR_COLORS = ["#22c55e", "#3b82f6", "#f97316", "#ec4899", "#a855f7", "#14b8a6"];
 
@@ -253,6 +254,9 @@ export const EditorSurface = ({
         } else {
           debouncedCursorUpdate(from);
         }
+      },
+      onBlur: ({ editor: editorInstance }) => {
+        ensureTrailingParagraphAfterSelectionBlock(editorInstance, PERSISTENT_BLOCK_NAMES);
       }
     },
     [documentId, provider]

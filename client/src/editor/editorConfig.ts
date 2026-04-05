@@ -1,4 +1,4 @@
-import type { Extension } from "@tiptap/core";
+import type { AnyExtension } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCursor from "@tiptap/extension-collaboration-cursor";
 import Highlight from "@tiptap/extension-highlight";
@@ -15,6 +15,8 @@ import StarterKit from "@tiptap/starter-kit";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { Link } from "./extensions/link";
+import { PersistentBlockquote } from "./extensions/persistentBlockquote";
+import { PersistentCodeBlock } from "./extensions/persistentCodeBlock";
 
 export const editorConfig = {
   placeholder: "Start typing...",
@@ -32,14 +34,18 @@ export type CollaborationConfig = {
 
 export const createEditorExtensions = (options?: {
   collaboration?: CollaborationConfig;
-}): Extension[] => {
-  const extensions: Extension[] = [
+}): AnyExtension[] => {
+  const extensions: AnyExtension[] = [
     StarterKit.configure({
+      blockquote: false,
+      codeBlock: false,
       history: options?.collaboration?.doc ? false : undefined,
       heading: {
         levels: [1, 2, 3]
       }
     }),
+    PersistentBlockquote,
+    PersistentCodeBlock,
     Underline,
     Highlight.configure({
       multicolor: false
@@ -64,7 +70,7 @@ export const createEditorExtensions = (options?: {
     TableRow,
     TableHeader,
     TableCell,
-    Link as Extension
+    Link as AnyExtension
   ];
 
   if (options?.collaboration?.doc) {

@@ -6,13 +6,21 @@ import { logout } from "../services/auth.service";
 const avatarBaseClass =
   "flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[#e7e7f3] text-sm font-bold text-[#4c4d9a] dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9]";
 
-export const UserMenu = () => {
+type UserMenuProps = {
+  onToggle?: (isOpen: boolean) => void;
+};
+
+export const UserMenu = ({ onToggle }: UserMenuProps) => {
   const { user, status, refresh } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  useEffect(() => {
+    onToggle?.(isOpen);
+  }, [isOpen, onToggle]);
 
   const userLabel = useMemo(() => {
     if (status !== "authenticated") {
@@ -67,9 +75,6 @@ export const UserMenu = () => {
     } catch {
       // Continue with local cleanup even if the request fails.
     }
-
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("auth_provider");
 
     try {
       await refresh();

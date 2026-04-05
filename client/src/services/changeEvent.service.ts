@@ -42,9 +42,9 @@ export const createChangeEvent = async (
   const response = await fetch(`${API_BASE_URL}/api/change-events`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${localStorage.getItem("auth_token")}`
+      "Content-Type": "application/json"
     },
+    credentials: "include",
     body: JSON.stringify(input)
   });
 
@@ -67,9 +67,9 @@ export const getPendingChanges = async (
     {
       method: "GET",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("auth_token")}`
-      }
+        "Content-Type": "application/json"
+      },
+      credentials: "include"
     }
   );
 
@@ -97,9 +97,9 @@ export const saveDocument = async (
     {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("auth_token")}`
+        "Content-Type": "application/json"
       },
+      credentials: "include",
       body: JSON.stringify(options)
     }
   );
@@ -170,7 +170,7 @@ export class ChangeEventTracker {
     const event: ChangeEvent = {
       id: crypto.randomUUID(),
       documentId: this.documentId,
-      userId: localStorage.getItem("user_id") || "unknown",
+      userId: "unknown",
       changeType,
       content,
       position: position ?? null,

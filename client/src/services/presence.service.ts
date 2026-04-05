@@ -16,11 +16,6 @@ const PRESENCE_BASE_URL = normalizeBaseUrl(
     "http://localhost:4000"
 );
 
-const getJwtHeaders = () => {
-  const token = localStorage.getItem("auth_token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
-
 const parseResponse = async (response: Response) => {
   let payload: unknown = null;
   try {
@@ -46,10 +41,6 @@ const postPresence = async (
   const headers: HeadersInit = {
     "Content-Type": "application/json"
   };
-  const jwtHeaders = getJwtHeaders();
-  if (jwtHeaders.Authorization) {
-    headers.Authorization = jwtHeaders.Authorization;
-  }
 
   const response = await fetch(
     `${PRESENCE_BASE_URL}/api/presence/${encodeURIComponent(documentId)}/${path}`,

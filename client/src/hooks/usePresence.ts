@@ -19,15 +19,6 @@ type CursorUpdatePayload = {
 
 const normalizeBaseUrl = (baseUrl: string) => baseUrl.replace(/\/$/, "");
 
-const getAuthHeaders = (): Record<string, string> => {
-  const headers: Record<string, string> = {};
-  const token = localStorage.getItem("auth_token");
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  return headers;
-};
-
 export const usePresence = (documentId?: string | null) => {
   const { presence, connectionStatus, dispatch } = useAppStore();
   const { collaborators, cursorPositions } = presence;
@@ -96,7 +87,7 @@ export const usePresence = (documentId?: string | null) => {
           `${baseUrl}/api/presence/${encodeURIComponent(documentId)}/${path}`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+            headers: { "Content-Type": "application/json" },
             credentials: "include",
             body: payload ? JSON.stringify(payload) : undefined
           }

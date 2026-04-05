@@ -1,8 +1,8 @@
 import { useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { useAuth } from "../auth/AuthContext";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { DEFAULT_AUTH_REDIRECT_PATH, useAuth } from "../auth/AuthContext";
 
-const appHomeHref = "/editor/recent?workspaceId=default";
+const appHomeHref = DEFAULT_AUTH_REDIRECT_PATH;
 
 const topNavLinks = [
   { href: "#features", label: "Features" },
@@ -91,6 +91,7 @@ const SocialLink = ({ label }: { label: string }) => (
 
 export const Landing = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { status } = useAuth();
   const isAuthenticated = status === "authenticated";
   const primaryCtaHref = isAuthenticated ? appHomeHref : "/auth/sign-up";
@@ -103,6 +104,15 @@ export const Landing = () => {
   const finalCtaHref = isAuthenticated ? appHomeHref : "/auth/sign-up";
 
   useEffect(() => {
+    if (status === "authenticated" && !location.hash) {
+      navigate(appHomeHref, { replace: true });
+      return;
+    }
+
+    if (status === "authenticated") {
+      return;
+    }
+
     if (!location.hash) {
       return;
     }
@@ -114,7 +124,7 @@ export const Landing = () => {
     }
 
     element.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [location.hash]);
+  }, [location.hash, navigate, status]);
 
   return (
     <div className="dark min-h-screen bg-background text-on-background selection:bg-primary-container selection:text-white">

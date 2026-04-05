@@ -1,34 +1,9 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { signUpWithEmail } from "../services/auth.service";
-import { SHARE_REDIRECT_STORAGE_KEY, useAuth } from "../auth/AuthContext";
-
-const isTruthyParam = (value: string | null) => {
-  if (value === null) {
-    return false;
-  }
-  if (value === "") {
-    return true;
-  }
-  const normalized = value.trim().toLowerCase();
-  return normalized === "1" || normalized === "true" || normalized === "yes";
-};
-
-const normalizeRedirectPath = (value: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.startsWith("/") ? trimmed : null;
-};
-
-const resolveRedirectFromState = (state: unknown) => {
-  const from = (state as { from?: { pathname?: string; search?: string } } | null)?.from;
-  if (!from?.pathname) {
-    return null;
-  }
-  return `${from.pathname}${from.search ?? ""}`;
-};
+import { DEFAULT_AUTH_REDIRECT_PATH, useAuth } from "../auth/AuthContext";
+import { normalizeRedirectPath, resolveRedirectFromState, storeRedirectPath } from "../auth/redirect";
+import { buildOAuthRedirectPath, isTruthyParam } from "../services/auth.service";
 
 export const SignUp = () => {
   const navigate = useNavigate();
@@ -58,17 +33,13 @@ export const SignUp = () => {
       return;
     }
     const payload = {
-      path: redirectPath,
-      token: shareToken,
-      share: shareRequested,
-      collab: collabRequested,
-      workspaceId: workspaceIdParam || undefined
+      shareToken,
+      shareRequested,
+      collabRequested,
+      workspaceId: workspaceIdParam,
+      redirectPath
     };
-    try {
-      sessionStorage.setItem(SHARE_REDIRECT_STORAGE_KEY, JSON.stringify(payload));
-    } catch {
-      // Ignore storage errors; fallback redirect still works via state.
-    }
+    storeRedirectPath(buildOAuthRedirectPath(payload));
   }, [shareToken, redirectPath, shareRequested, collabRequested, workspaceIdParam]);
 
   const signInLink = useMemo(() => {
@@ -100,17 +71,13 @@ export const SignUp = () => {
     setError(null);
     setLoading(true);
     try {
-      const result = await signUpWithEmail(
+      await signUpWithEmail(
         formData.fullName.trim(),
         formData.email.trim(),
         formData.password
       );
-      if (result.token) {
-        localStorage.setItem("auth_token", result.token);
-        localStorage.setItem("auth_provider", "better-auth");
-      }
       await refresh();
-      const redirectTo = getRedirectPath(redirectPath ?? "/editor/recent");
+      const redirectTo = getRedirectPath(redirectPath ?? DEFAULT_AUTH_REDIRECT_PATH);
       navigate(redirectTo, { replace: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Sign up failed";

@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 const LandingPage = lazy(() => import("../pages/Landing").then((module) => ({ default: module.Landing })));
 const SignInPage = lazy(() => import("../pages/SignIn").then((module) => ({ default: module.SignIn })));
 const SignUpPage = lazy(() => import("../pages/SignUp").then((module) => ({ default: module.SignUp })));
+const AuthCallbackPage = lazy(() => import("../pages/AuthCallback").then((module) => ({ default: module.AuthCallback })));
 const EditorPage = lazy(() => import("../pages/Editor").then((module) => ({ default: module.Editor })));
 const RecentPage = lazy(() => import("../pages/Recent").then((module) => ({ default: module.Recent })));
 const StarredPage = lazy(() => import("../pages/Starred").then((module) => ({ default: module.Starred })));
@@ -134,5 +135,9 @@ export const router = createBrowserRouter([
   {
     path: "/auth/sign-up",
     element: withSuspense(SignUpPage)
+  },
+  {
+    path: "/auth/callback",
+    element: withSuspense(AuthCallbackPage)
   }
 ]);

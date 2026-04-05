@@ -62,7 +62,9 @@ export const Toolbar = ({ editor, className, onRequestLink }: ToolbarProps) => {
     ? `flex flex-wrap items-center gap-1 rounded-xl border border-[#e7e7f3] bg-white p-2 shadow-xl dark:border-[#2d2e4a] dark:bg-[#1c1d3a] ${className}`
     : "flex flex-wrap items-center gap-1 rounded-xl border border-[#e7e7f3] bg-white p-2 shadow-xl dark:border-[#2d2e4a] dark:bg-[#1c1d3a]";
 
-  const canRun = (command: (chain: ReturnType<Editor["can"]>["chain"]) => { run: () => boolean }) => {
+  const canRun = (
+    command: (chain: ReturnType<ReturnType<Editor["can"]>["chain"]>) => { run: () => boolean }
+  ) => {
     if (!editor) {
       return false;
     }
@@ -118,7 +120,23 @@ export const Toolbar = ({ editor, className, onRequestLink }: ToolbarProps) => {
         label="Inline code"
         active={Boolean(editor?.isActive("code"))}
         disabled={!canRun((chain) => chain.toggleCode())}
-        onClick={() => editor?.chain().focus().toggleCode().run()}
+        onClick={() => {
+          if (!editor) {
+            return;
+          }
+
+          if (!editor.isActive("code")) {
+            editor.chain().focus().toggleCode().run();
+            return;
+          }
+
+          if (!editor.state.selection.empty) {
+            editor.chain().focus().toggleCode().run();
+            return;
+          }
+
+          editor.chain().focus().insertContent(" ").run();
+        }}
       />
       <ToolbarButton
         editor={editor}
@@ -169,7 +187,18 @@ export const Toolbar = ({ editor, className, onRequestLink }: ToolbarProps) => {
         label="Blockquote"
         active={Boolean(editor?.isActive("blockquote"))}
         disabled={!canRun((chain) => chain.toggleBlockquote())}
-        onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+        onClick={() => {
+          if (!editor) {
+            return;
+          }
+
+          if (editor.isActive("blockquote")) {
+            editor.chain().focus().toggleBlockquote().run();
+            return;
+          }
+
+          editor.chain().focus().toggleBlockquote().run();
+        }}
       />
       <ToolbarButton
         editor={editor}

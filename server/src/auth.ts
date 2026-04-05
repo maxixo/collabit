@@ -13,7 +13,8 @@ const googleConfig =
     ? {
         google: {
           clientId: env.googleClientId,
-          clientSecret: env.googleClientSecret
+          clientSecret: env.googleClientSecret,
+          redirectURI: `${env.authBaseUrl}/api/auth/callback/google`
         }
       }
     : undefined;
@@ -28,6 +29,10 @@ export const auth = betterAuth({
   database: pool,
   baseURL: env.authBaseUrl,
   secret: authSecret,
+  trustedOrigins: [env.authBaseUrl, ...env.corsOrigins],
+  account: {
+    storeStateStrategy: "database"
+  },
   emailAndPassword: {
     enabled: true
   },

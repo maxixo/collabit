@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { storeRedirectPath } from "../auth/redirect";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 
@@ -7,6 +8,7 @@ interface OAuthGoogleButtonProps {
   className?: string;
   containerClassName?: string;
   errorClassName?: string;
+  redirectPath?: string;
   children?: ReactNode;
 }
 
@@ -15,6 +17,7 @@ export const OAuthGoogleButton = ({
   className = "auth-google",
   containerClassName,
   errorClassName,
+  redirectPath,
   children
 }: OAuthGoogleButtonProps) => {
   const [loading, setLoading] = useState(false);
@@ -25,13 +28,17 @@ export const OAuthGoogleButton = ({
     setError(null);
 
     try {
+      if (redirectPath) {
+        storeRedirectPath(redirectPath);
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/auth/sign-in/social`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
           provider: "google",
-          callbackURL: window.location.origin,
+          callbackURL: `${window.location.origin}/auth/callback`,
           disableRedirect: true
         })
       });

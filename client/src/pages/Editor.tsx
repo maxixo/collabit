@@ -104,6 +104,7 @@ export const Editor = () => {
   const [shareValidationError, setShareValidationError] = useState<string | null>(null);
   const [isValidatingShare, setIsValidatingShare] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isExportingFormat, setIsExportingFormat] = useState<"pdf" | "doc" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
@@ -712,6 +713,7 @@ export const Editor = () => {
     setLocalVersion(EMPTY_TIPTAP_DOC);
     setServerVersion(EMPTY_TIPTAP_DOC);
     setShowExportMenu(false);
+    setIsUserMenuOpen(false);
     setExportError(null);
   }, [documentId]);
 
@@ -1073,7 +1075,7 @@ export const Editor = () => {
                   <span className="material-symbols-outlined !text-[18px]">share</span>
                   <span>Share</span>
                 </button>
-                <UserMenu />
+                <UserMenu onToggle={setIsUserMenuOpen} />
               </div>
             </div>
           </header>
@@ -1140,7 +1142,7 @@ export const Editor = () => {
               onCursorUpdate={sendCursorUpdate}
               onSelectionUpdate={sendSelectionUpdate}
               collaborationEnabled={collaborationEnabled}
-              hideToolbar={showExportMenu}
+              hideToolbar={showExportMenu || isUserMenuOpen}
               autoFocusTitle={shouldFocusTitle}
               docTitle={docTitle}
               loading={effectiveLoading}

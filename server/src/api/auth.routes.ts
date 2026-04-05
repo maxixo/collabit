@@ -2,21 +2,34 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from "exp
 import { Router } from "express";
 import { auth } from "../auth.js";
 import { env } from "../config/env.js";
+import { logger } from "../utils/logger.js";
 
 export const authRoutes = Router();
 
 const buildAuthRequest = (
   req: ExpressRequest,
   path: string,
-  body?: Record<string, unknown>
+  body?: Record<string, unknown>,
+  options?: { method?: "GET" | "POST" }
 ) => {
   const baseUrl = env.authBaseUrl || `${req.protocol}://${req.get("host")}`;
   const url = new URL(`/api/auth/${path}`, baseUrl);
   const headers = new Headers();
+  const method = options?.method ?? "POST";
 
-  headers.set("content-type", "application/json");
+  if (method !== "GET") {
+    headers.set("content-type", "application/json");
+  }
 
-  const forwardedHeaders = ["cookie", "user-agent", "x-forwarded-for", "x-forwarded-proto"];
+  const forwardedHeaders = [
+    "cookie",
+    "origin",
+    "referer",
+    "user-agent",
+    "x-forwarded-for",
+    "x-forwarded-proto",
+    "x-forwarded-host"
+  ];
   forwardedHeaders.forEach((headerName) => {
     const value = req.header(headerName);
     if (value) {
@@ -25,9 +38,9 @@ const buildAuthRequest = (
   });
 
   return new Request(url.toString(), {
-    method: "POST",
+    method,
     headers,
-    body: body ? JSON.stringify(body) : undefined
+    body: method === "GET" || !body ? undefined : JSON.stringify(body)
   });
 };
 
@@ -43,6 +56,17 @@ const getSetCookieHeaders = (response: Response): string[] => {
 
 const sendAuthResponse = async (res: ExpressResponse, response: Response) => {
   const setCookieHeaders = getSetCookieHeaders(response);
+  const text = await response.text();
+
+  if (response.status >= 400) {
+    logger.error("[OAuth] Better Auth returned error response", {
+      status: response.status,
+      location: response.headers.get("location"),
+      contentType: response.headers.get("content-type"),
+      body: text
+    });
+  }
+
   response.headers.forEach((value, key) => {
     if (key.toLowerCase() !== "set-cookie") {
       res.setHeader(key, value);
@@ -51,7 +75,6 @@ const sendAuthResponse = async (res: ExpressResponse, response: Response) => {
   setCookieHeaders.forEach((cookie) => res.append("set-cookie", cookie));
 
   res.status(response.status);
-  const text = await response.text();
   res.send(text);
 };
 
@@ -130,12 +153,26 @@ authRoutes.post("/sign-in/social", async (req, res, next) => {
       return;
     }
 
+    logger.debug("[OAuth] Starting social sign-in", {
+      provider,
+      callbackURL,
+      authBaseUrl: env.authBaseUrl,
+      requestOrigin: req.header("origin"),
+      requestReferer: req.header("referer")
+    });
+
     const authRequest = buildAuthRequest(req, "sign-in/social", {
       provider,
       callbackURL,
       disableRedirect
     });
     const response = await auth.handler(authRequest);
+
+    logger.debug("[OAuth] Social sign-in response", {
+      status: response.status,
+      location: response.headers.get("location")
+    });
+
     await sendAuthResponse(res, response);
   } catch (error) {
     next(error);
@@ -177,20 +214,37 @@ authRoutes.get("/me", async (req, res, next) => {
 
 authRoutes.get("/callback/:provider", async (req, res, next) => {
   try {
-    const baseUrl = env.authBaseUrl || `${req.protocol}://${req.get("host")}`;
-    const fullUrl = new URL(req.originalUrl, baseUrl);
-    const headers = new Headers();
-    const cookieHeader = req.header("cookie");
-    if (cookieHeader) {
-      headers.set("cookie", cookieHeader);
-    }
-
-    const response = await auth.handler(
-      new Request(fullUrl.toString(), {
-        method: "GET",
-        headers
+    const query = new URLSearchParams(
+      Object.entries(req.query as Record<string, string | string[] | undefined>).flatMap(([key, value]) => {
+        if (typeof value === "undefined") {
+          return [];
+        }
+        if (Array.isArray(value)) {
+          return value.map((entry) => [key, entry]);
+        }
+        return [[key, value]];
       })
-    );
+    ).toString();
+    const path = query ? `callback/${req.params.provider}?${query}` : `callback/${req.params.provider}`;
+
+    logger.debug("[OAuth] Handling provider callback", {
+      provider: req.params.provider,
+      callbackPath: path,
+      fullCallbackUrl: `${env.authBaseUrl}/api/auth/${path}`,
+      authBaseUrl: env.authBaseUrl,
+      requestOriginalUrl: req.originalUrl,
+      requestOrigin: req.header("origin"),
+      requestReferer: req.header("referer")
+    });
+
+    const authRequest = buildAuthRequest(req, path, undefined, { method: "GET" });
+    const response = await auth.handler(authRequest);
+
+    logger.debug("[OAuth] Callback response", {
+      provider: req.params.provider,
+      status: response.status,
+      location: response.headers.get("location")
+    });
 
     await sendAuthResponse(res, response);
   } catch (error) {
