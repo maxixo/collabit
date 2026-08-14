@@ -14,7 +14,7 @@ import { validateShareToken } from "../services/share.service";
 import { searchDocumentsWithFallback } from "../services/search.service";
 import { indexDocument, type SearchResult } from "../offline/searchIndex";
 import { debounce } from "../utils/debounce";
-import { EMPTY_TIPTAP_DOC } from "../utils/tiptapContent";
+import { EMPTY_TIPTAP_DOC, sanitizeTipTapContent } from "../utils/tiptapContent";
 import { subscribeToStarUpdates } from "../utils/starEvents";
 import { ConflictModal } from "../components/ConflictModal";
 import { UserMenu } from "../components/UserMenu";
@@ -127,8 +127,7 @@ export const Editor = () => {
   
   // Display helpers - declare these early since they're used in conditional checks
   const hasShareTokenError = Boolean(shareValidationError);
-  const fallbackTitle = id ? id.replace(/-/g, " ") : "Untitled document";
-  const docTitle = activeDocument?.title ?? fallbackTitle;
+  const docTitle = activeDocument?.title ?? "";
   const displayTitle = docTitle.trim().length > 0 ? docTitle : "Untitled document";
   const shouldFocusTitle = Boolean((location.state as { focusTitle?: boolean } | null)?.focusTitle);
   const isRecentRoute = location.pathname === "/editor/recent";
@@ -400,10 +399,30 @@ export const Editor = () => {
 
     try {
       const created = await createDocument({
-        title: "Untitled document",
+        title: "",
         content: emptyContent as Record<string, unknown>,
         workspaceId
       });
+
+      const nextDocument = {
+        ...created,
+        content: sanitizeTipTapContent(created.content ?? EMPTY_TIPTAP_DOC) as Record<string, unknown>
+      };
+
+      dispatch(
+        actions.addRecentDocument({
+          id: created.id,
+          title: created.title,
+          updatedAt: created.updatedAt,
+          ownerId: created.ownerId,
+          workspaceId: created.workspaceId || workspaceId,
+          isStarred: created.isStarred
+        })
+      );
+
+      documentRef.current = nextDocument;
+      setLocalDocument(nextDocument);
+      setEditorStats({ wordCount: 0, charCount: 0 });
 
       navigate(`/editor/${encodeURIComponent(created.id)}?workspaceId=${encodeURIComponent(workspaceId)}`, {
         state: { focusTitle: true }
@@ -413,7 +432,7 @@ export const Editor = () => {
     } finally {
       setIsCreating(false);
     }
-  }, [emptyContent, isCreating, navigate, workspaceId]);
+  }, [dispatch, emptyContent, isCreating, navigate, setLocalDocument, workspaceId]);
 
   const documentId = id ?? activeDocument?.id ?? null;
   const isStarred = Boolean(activeDocument?.isStarred);
@@ -430,15 +449,19 @@ export const Editor = () => {
   // Pending Changes Hook (must be after documentId and collaborationEnabled are declared)
   const {
     pendingChanges,
+    suggestions,
     isSaving: isSavingDocument,
     hasPendingChanges,
     totalPendingChanges,
-    versionSaveDocument
+    versionSaveDocument,
+    reviewSingleSuggestion,
+    reviewSuggestionsByAuthor,
+    createDocumentSuggestion
   } = usePendingChanges({
     documentId: documentId || "",
     workspaceId,
     shareToken: shareToken ?? undefined,
-    enabled: Boolean(documentId && workspaceId)
+    enabled: Boolean(documentId && workspaceId && collaborationEnabled)
   });
 
   const applyLocalStarUpdate = useCallback(
@@ -650,6 +673,28 @@ export const Editor = () => {
     }
   }, [getVersionSaveSnapshot, versionSaveDocument]);
 
+  const handleAcceptSelectedSuggestions = useCallback(
+    async (userIds: string[]) => {
+      try {
+        await reviewSuggestionsByAuthor(userIds, "accept");
+      } catch (error) {
+        console.error("Failed to accept collaborator suggestions:", error);
+      }
+    },
+    [reviewSuggestionsByAuthor]
+  );
+
+  const handleRejectSelectedSuggestions = useCallback(
+    async (userIds: string[]) => {
+      try {
+        await reviewSuggestionsByAuthor(userIds, "reject");
+      } catch (error) {
+        console.error("Failed to reject collaborator suggestions:", error);
+      }
+    },
+    [reviewSuggestionsByAuthor]
+  );
+
   // Handle history restore
   const handleHistoryRestore = useCallback(
     ({ documentId: restoredDocumentId, content }: { documentId: string; content: JSONContent }) => {
@@ -795,6 +840,7 @@ export const Editor = () => {
               type="button"
               onClick={handleCreateDocument}
               disabled={isCreating || !workspaceId}
+              data-testid="create-document-button"
             >
               <span className="material-symbols-outlined">add</span>
               <span>{isCreating ? "Creating..." : "New Document"}</span>
@@ -968,8 +1014,12 @@ export const Editor = () => {
                     </div>
                   )}
                 </div>
-                <Presence onlineCount={onlineCount} className="ml-3 text-xs text-[#4c4d9a]" />
+              <div className="ml-3 flex items-center gap-2 rounded-full bg-[#f3efff] px-3 py-1 text-xs text-[#5e3aa8] dark:bg-[#24183c] dark:text-[#d6c8ff]">
+                <span className="material-symbols-outlined !text-[14px]">hub</span>
+                <span className="material-symbols-outlined !text-[14px]">groups</span>
+                <Presence onlineCount={onlineCount} className="text-xs text-inherit" />
               </div>
+            </div>
               <div className="h-6 w-px bg-[#e7e7f3] dark:bg-[#2d2e4a]"></div>
               <div className="flex items-center gap-2">
                 <button
@@ -1071,6 +1121,7 @@ export const Editor = () => {
                   type="button"
                   onClick={handleShareClick}
                   disabled={!workspaceId || !documentId}
+                  data-testid="open-share-modal-button"
                 >
                   <span className="material-symbols-outlined !text-[18px]">share</span>
                   <span>Share</span>
@@ -1148,6 +1199,10 @@ export const Editor = () => {
               loading={effectiveLoading}
               error={effectiveError}
               shareToken={shareToken}
+              suggestions={suggestions}
+              canReviewSuggestions={accessRole === "owner"}
+              onSuggestionReview={reviewSingleSuggestion}
+              onCreateSuggestion={createDocumentSuggestion}
             />
           </div>
 
@@ -1204,6 +1259,8 @@ export const Editor = () => {
         pendingChanges={pendingChanges}
         onApplySave={handleApplySave}
         onSaveOnly={handleSaveOnly}
+        onAcceptSelected={handleAcceptSelectedSuggestions}
+        onRejectSelected={handleRejectSelectedSuggestions}
         onCancel={() => setShowSaveModal(false)}
         isSaving={isSavingDocument}
       />

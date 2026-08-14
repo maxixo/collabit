@@ -61,6 +61,26 @@ npm run test
 npm run build
 ```
 
+### Playwright Editor Checks
+
+Run the app stack first, then execute the browser regression suite from the client workspace:
+
+```bash
+npm run test:e2e --workspace client
+```
+
+Optional environment variables:
+
+- `PLAYWRIGHT_BASE_URL` default: `http://localhost:5173`
+- `PLAYWRIGHT_API_BASE_URL` default: `http://localhost:4000`
+
+Additional commands:
+
+```bash
+npm run test:e2e:ui --workspace client
+npm run test:e2e:headed --workspace client
+```
+
 ## Architecture Notes
 
 - `client/` contains the React application, offline queueing, local cache, and editor UI.

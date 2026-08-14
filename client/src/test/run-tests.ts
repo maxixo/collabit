@@ -11,6 +11,7 @@ import {
   validateProfileUpdate
 } from "../services/user.service.ts";
 import { formatWorkspaceName } from "../services/workspace.service.ts";
+import { getPrimarySuggestionChange } from "../editor/suggestionChanges.ts";
 
 const makeQueueItem = (
   overrides: Partial<DocumentQueueLike> & { payload?: Partial<DocumentQueuePayload> } = {}
@@ -40,6 +41,54 @@ const makeServerDocument = (overrides: Partial<DocumentDetail>): DocumentDetail 
   workspaceId: overrides.workspaceId ?? "workspace-1",
   isStarred: overrides.isStarred ?? false
 });
+
+const makeSuggestionTransaction = (options: {
+  oldRange: { from: number; to: number };
+  newRange: { from: number; to: number };
+  originalText: string;
+  suggestedText: string;
+}) => {
+  let sliceCallCount = 0;
+  let invertCallCount = 0;
+
+  return {
+    mapping: {
+      maps: [
+        {
+          forEach: (callback: (from: number, to: number) => void) => {
+            callback(options.oldRange.from, options.oldRange.to);
+          }
+        }
+      ],
+      slice: () => ({
+        map: () => {
+          sliceCallCount += 1;
+          return sliceCallCount === 1 ? options.newRange.from : options.newRange.to;
+        }
+      }),
+      invert: () => ({
+        map: () => {
+          invertCallCount += 1;
+          return invertCallCount === 1 ? options.oldRange.from : options.oldRange.to;
+        }
+      })
+    },
+    steps: [
+      {
+        from: options.oldRange.from,
+        to: options.oldRange.to
+      }
+    ],
+    before: {
+      textBetween: (from: number, to: number) =>
+        from === options.oldRange.from && to === options.oldRange.to ? options.originalText : ""
+    },
+    doc: {
+      textBetween: (from: number, to: number) =>
+        from === options.newRange.from && to === options.newRange.to ? options.suggestedText : ""
+    }
+  } as never;
+};
 
 const tests: Array<{ name: string; run: () => void }> = [
   {
@@ -124,6 +173,57 @@ const tests: Array<{ name: string; run: () => void }> = [
         ),
         true
       );
+    }
+  },
+  {
+    name: "suggestion helper classifies inserts",
+    run: () => {
+      const change = getPrimarySuggestionChange(
+        makeSuggestionTransaction({
+          oldRange: { from: 5, to: 5 },
+          newRange: { from: 5, to: 10 },
+          originalText: "",
+          suggestedText: "hello"
+        })
+      );
+
+      assert.equal(change?.suggestionType, "insert");
+      assert.equal(change?.suggestedText, "hello");
+      assert.equal(change?.originalText, null);
+    }
+  },
+  {
+    name: "suggestion helper classifies deletes",
+    run: () => {
+      const change = getPrimarySuggestionChange(
+        makeSuggestionTransaction({
+          oldRange: { from: 3, to: 8 },
+          newRange: { from: 3, to: 3 },
+          originalText: "draft",
+          suggestedText: ""
+        })
+      );
+
+      assert.equal(change?.suggestionType, "delete");
+      assert.equal(change?.originalText, "draft");
+      assert.equal(change?.suggestedText, null);
+    }
+  },
+  {
+    name: "suggestion helper classifies replacements",
+    run: () => {
+      const change = getPrimarySuggestionChange(
+        makeSuggestionTransaction({
+          oldRange: { from: 2, to: 5 },
+          newRange: { from: 2, to: 6 },
+          originalText: "old",
+          suggestedText: "newer"
+        })
+      );
+
+      assert.equal(change?.suggestionType, "replace");
+      assert.equal(change?.originalText, "old");
+      assert.equal(change?.suggestedText, "newer");
     }
   }
 ];

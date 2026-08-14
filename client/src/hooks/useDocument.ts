@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentState } from "../types";
-import { createDocument, fetchDocumentById, updateDocument } from "../services/document.service";
+import { fetchDocumentById, updateDocument } from "../services/document.service";
 import { saveDocument as cacheDocument } from "../offline/indexedDb";
 import { indexDocument } from "../offline/searchIndex";
 import {
@@ -9,10 +9,9 @@ import {
   subscribeToDocumentQueue
 } from "../offline/documentQueue";
 import { debounce } from "../utils/debounce";
-import { EMPTY_TIPTAP_DOC, sanitizeTipTapContent } from "../utils/tiptapContent";
+import { sanitizeTipTapContent } from "../utils/tiptapContent";
 
 const DEFAULT_AUTOSAVE_MS = 1200;
-const EMPTY_CONTENT = EMPTY_TIPTAP_DOC;
 
 export type SaveStatus =
   | "idle"
@@ -188,13 +187,15 @@ export const useDocument = (
 
   useEffect(() => {
     let isMounted = true;
+    const previousDocumentId = currentDocumentIdRef.current;
+    const nextDocumentId = documentId ?? null;
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     const nextController = new AbortController();
     abortControllerRef.current = nextController;
-    currentDocumentIdRef.current = documentId ?? null;
+    currentDocumentIdRef.current = nextDocumentId;
     lastSyncedDocumentRef.current = null;
 
     setSaveStatus("idle");
@@ -204,6 +205,10 @@ export const useDocument = (
     saveCounterRef.current = 0;
     pendingSaveRef.current = 0;
     cancelPendingSave();
+
+    if (previousDocumentId !== nextDocumentId) {
+      setDocument(null);
+    }
 
     const loadDocument = async () => {
       if (!documentId || (!workspaceId && !shareToken)) {
@@ -227,31 +232,16 @@ export const useDocument = (
           return;
         }
 
-        let nextDocument: DocumentState;
-
         if (!result) {
-          if (!workspaceId) {
-            setError("workspaceId is required");
-            setLoading(false);
-            return;
-          }
-
-          const fallbackTitle = documentId.replace(/-/g, " ");
-          const created = await createDocument({
-            id: documentId,
-            title: fallbackTitle || "Untitled document",
-            content: EMPTY_CONTENT,
-            workspaceId
-          });
-          if (!isMounted) {
-            return;
-          }
-          nextDocument = toDocumentState(created);
-          setAccessRole("owner");
-        } else {
-          nextDocument = toDocumentState(result);
-          setAccessRole(result.accessRole ?? null);
+          setDocument(null);
+          setAccessRole(null);
+          setError("Document not found");
+          setLoading(false);
+          return;
         }
+
+        const nextDocument = toDocumentState(result);
+        setAccessRole(result.accessRole ?? null);
 
         lastSyncedDocumentRef.current = nextDocument;
 

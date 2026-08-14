@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor as TipTapEditor, JSONContent } from "@tiptap/core";
+import type { DocumentSuggestion, SuggestionMetadata } from "@shared/types";
+import { ySyncPluginKey } from "y-prosemirror";
 import { createEditorExtensions } from "./editorConfig";
 import { Toolbar } from "./Toolbar";
 import { destroyYjsProvider, getYjsProvider, type YjsProvider } from "../collaboration/yjsProvider";
@@ -11,6 +13,66 @@ import { debounce } from "../utils/debounce";
 import { EMPTY_TIPTAP_DOC, sanitizeTipTapContent } from "../utils/tiptapContent";
 import { BubbleMenuPortal } from "./BubbleMenuPortal";
 import { ensureTrailingParagraphAfterSelectionBlock, PERSISTENT_BLOCK_NAMES } from "./extensions/blockExit";
+import { captureSuggestionAnchors, resolveSuggestionRange } from "./suggestionAnchors";
+import { getPrimarySuggestionChange } from "./suggestionChanges";
+import { suggestionDecorationsKey } from "./extensions/suggestionDecorations";
+
+const clearSuggestionMark = (
+  editorInstance: TipTapEditor,
+  range: { from: number; to: number },
+  suggestionId: string
+) => {
+  if (range.to <= range.from) {
+    return;
+  }
+
+  const suggestionMark = editorInstance.schema.marks.suggestion;
+  if (!suggestionMark) {
+    return;
+  }
+
+  const transaction = editorInstance.state.tr;
+  editorInstance.state.doc.nodesBetween(range.from, range.to, (node, pos) => {
+    if (!node.isText) {
+      return;
+    }
+
+    const matchingMark = node.marks.find(
+      (mark) => mark.type === suggestionMark && mark.attrs.suggestionId === suggestionId
+    );
+
+    if (!matchingMark) {
+      return;
+    }
+
+    const markFrom = Math.max(pos, range.from);
+    const markTo = Math.min(pos + node.nodeSize, range.to);
+    if (markTo > markFrom) {
+      transaction.removeMark(markFrom, markTo, suggestionMark);
+    }
+  });
+
+  if (transaction.docChanged) {
+    editorInstance.view.dispatch(transaction);
+  }
+};
+
+const clearAllSuggestionMarks = (editorInstance: TipTapEditor) => {
+  const suggestionMark = editorInstance.schema.marks.suggestion;
+  if (!suggestionMark) {
+    return;
+  }
+
+  const docSize = editorInstance.state.doc.content.size;
+  if (docSize <= 0) {
+    return;
+  }
+
+  const transaction = editorInstance.state.tr.removeMark(0, docSize, suggestionMark);
+  if (transaction.docChanged) {
+    editorInstance.view.dispatch(transaction);
+  }
+};
 
 const CURSOR_COLORS = ["#22c55e", "#3b82f6", "#f97316", "#ec4899", "#a855f7", "#14b8a6"];
 
@@ -67,6 +129,17 @@ type EditorSurfaceProps = {
   loading?: boolean;
   error?: string | null;
   shareToken?: string | null;
+  suggestions?: DocumentSuggestion[];
+  canReviewSuggestions?: boolean;
+  onSuggestionReview?: (suggestionId: string, action: "accept" | "reject") => Promise<unknown>;
+  onCreateSuggestion?: (input: {
+    suggestionType: "insert" | "delete" | "replace" | "format";
+    from: number;
+    to: number;
+    originalText?: string | null;
+    suggestedText?: string | null;
+    metadata?: SuggestionMetadata;
+  }) => Promise<unknown>;
 };
 
 export const EditorSurface = ({
@@ -86,7 +159,11 @@ export const EditorSurface = ({
   docTitle,
   loading = false,
   error = null,
-  shareToken = null
+  shareToken = null,
+  suggestions = [],
+  canReviewSuggestions = false,
+  onSuggestionReview,
+  onCreateSuggestion
 }: EditorSurfaceProps) => {
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const onStatsChangeRef = useRef(onStatsChange);
@@ -100,8 +177,21 @@ export const EditorSurface = ({
   const linkEditorRef = useRef<HTMLDivElement | null>(null);
   const linkInputRef = useRef<HTMLInputElement | null>(null);
   const [providerState, setProviderState] = useState<ProviderState | null>(null);
+  const [activeSuggestionId, setActiveSuggestionId] = useState<string | null>(null);
+  const [isReviewingSuggestion, setIsReviewingSuggestion] = useState(false);
+  const [suggestionReviewError, setSuggestionReviewError] = useState<string | null>(null);
+  const [suggestionPopover, setSuggestionPopover] = useState<{ left: number; top: number } | null>(null);
+  const suggestionPopoverRef = useRef<HTMLDivElement | null>(null);
+  const suggestionHideTimeoutRef = useRef<number | null>(null);
+  const lastSuggestionSignatureRef = useRef<string | null>(null);
+  const isApplyingSuggestionRef = useRef(false);
   const provider =
     providerState && providerState.documentId === documentId ? providerState.provider : null;
+  const suggestionMap = useMemo(
+    () => new Map(suggestions.map((suggestion) => [suggestion.id, suggestion])),
+    [suggestions]
+  );
+  const activeSuggestion = activeSuggestionId ? suggestionMap.get(activeSuggestionId) ?? null : null;
 
   const presenceUserId = authStatus === "authenticated" ? authUser?.id ?? null : null;
   const presenceName = authUser?.name ?? authUser?.email ?? "Anonymous";
@@ -144,6 +234,75 @@ export const EditorSurface = ({
     []
   );
 
+  const clearSuggestionHideTimeout = useCallback(() => {
+    if (suggestionHideTimeoutRef.current !== null) {
+      window.clearTimeout(suggestionHideTimeoutRef.current);
+      suggestionHideTimeoutRef.current = null;
+    }
+  }, []);
+
+  const queueSuggestionPopoverHide = useCallback(() => {
+    clearSuggestionHideTimeout();
+    suggestionHideTimeoutRef.current = window.setTimeout(() => {
+      setActiveSuggestionId(null);
+      setSuggestionPopover(null);
+    }, 180);
+  }, [clearSuggestionHideTimeout]);
+
+  const applySuggestionResolution = useCallback(
+    (editorInstance: TipTapEditor, suggestion: DocumentSuggestion, action: "accept" | "reject") => {
+      const range = resolveSuggestionRange(editorInstance.state, suggestion);
+      if (!range) {
+        throw new Error("Suggestion is no longer attached to editable content.");
+      }
+
+      if (suggestion.suggestionType === "delete") {
+        if (action === "reject" && suggestion.originalText) {
+          editorInstance.chain().focus().insertContentAt(range.from, suggestion.originalText).run();
+        }
+        return;
+      }
+
+      if (action === "accept") {
+        clearSuggestionMark(editorInstance, range, suggestion.id);
+        return;
+      }
+
+      if (suggestion.suggestionType === "insert") {
+        editorInstance.chain().focus().deleteRange(range).run();
+        return;
+      }
+
+      if (suggestion.suggestionType === "replace") {
+        editorInstance
+          .chain()
+          .focus()
+          .insertContentAt(range, suggestion.originalText ?? "")
+          .run();
+        const restoredRange = {
+          from: range.from,
+          to: range.from + (suggestion.originalText ?? "").length
+        };
+        clearSuggestionMark(editorInstance, restoredRange, suggestion.id);
+        return;
+      }
+
+      if (suggestion.suggestionType === "format" && suggestion.originalText) {
+        editorInstance
+          .chain()
+          .focus()
+          .insertContentAt(range, suggestion.originalText)
+          .run();
+        const restoredRange = {
+          from: range.from,
+          to: range.from + suggestion.originalText.length
+        };
+        clearSuggestionMark(editorInstance, restoredRange, suggestion.id);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
@@ -167,8 +326,9 @@ export const EditorSurface = ({
   useEffect(() => {
     return () => {
       debouncedCursorUpdate.cancel();
+      clearSuggestionHideTimeout();
     };
-  }, [debouncedCursorUpdate, documentId]);
+  }, [clearSuggestionHideTimeout, debouncedCursorUpdate, documentId]);
 
   useEffect(() => {
     didAutoFocusRef.current = false;
@@ -231,17 +391,107 @@ export const EditorSurface = ({
               collaboration: {
                 doc: provider.doc,
                 awareness: provider.awareness,
-                user: collaborationUser
+                user: collaborationUser,
+                showSelection: !shareToken
               }
             }
           : undefined
       ),
+      editorProps: {
+        attributes: {
+          class: "suggestion-editor-surface"
+        },
+        handleDOMEvents: {
+          mousemove: (view, event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) {
+              return false;
+            }
+
+            const markElement = target.closest("[data-suggestion-id]");
+            if (!(markElement instanceof HTMLElement)) {
+              queueSuggestionPopoverHide();
+              return false;
+            }
+
+            clearSuggestionHideTimeout();
+            const editorBounds = view.dom.getBoundingClientRect();
+            const markBounds = markElement.getBoundingClientRect();
+
+            setActiveSuggestionId(markElement.dataset.suggestionId ?? null);
+            setSuggestionPopover({
+              left: Math.max(16, markBounds.left - editorBounds.left),
+              top: Math.max(12, markBounds.top - editorBounds.top - 52)
+            });
+
+            return false;
+          },
+          mouseleave: () => {
+            queueSuggestionPopoverHide();
+            return false;
+          }
+        }
+      },
       content: EMPTY_TIPTAP_DOC,
       editable,
-      onUpdate: ({ editor: editorInstance }) => {
+      onUpdate: ({ editor: editorInstance, transaction }) => {
         const nextContent = editorInstance.getJSON() as JSONContent;
         onChangeRef.current(nextContent);
         updateStats(editorInstance);
+
+        const syncMeta = transaction.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined;
+
+        if (
+          !onCreateSuggestion ||
+          !documentId ||
+          !collaborationEnabled ||
+          !editable ||
+          !transaction.docChanged ||
+          syncMeta?.isChangeOrigin ||
+          isApplyingSuggestionRef.current
+        ) {
+          return;
+        }
+
+        const suggestionChange = getPrimarySuggestionChange(transaction);
+        if (!suggestionChange) {
+          return;
+        }
+
+        const anchors = captureSuggestionAnchors(editorInstance, suggestionChange.newRange);
+        const signature = [
+          suggestionChange.suggestionType,
+          suggestionChange.oldRange.from,
+          suggestionChange.oldRange.to,
+          suggestionChange.newRange.from,
+          suggestionChange.newRange.to,
+          suggestionChange.originalText ?? "",
+          suggestionChange.suggestedText ?? ""
+        ].join(":");
+
+        if (lastSuggestionSignatureRef.current === signature) {
+          return;
+        }
+
+        lastSuggestionSignatureRef.current = signature;
+
+        void onCreateSuggestion({
+          suggestionType: suggestionChange.suggestionType,
+          from: suggestionChange.newRange.from,
+          to: suggestionChange.newRange.to,
+          originalText: suggestionChange.originalText,
+          suggestedText: suggestionChange.suggestedText,
+          metadata: {
+            ...(anchors ?? {}),
+            snapshotText: suggestionChange.suggestedText ?? suggestionChange.originalText ?? null,
+            createdFrom: "editor-update",
+            capturedAt: new Date().toISOString()
+          }
+        }).catch(() => {
+          if (lastSuggestionSignatureRef.current === signature) {
+            lastSuggestionSignatureRef.current = null;
+          }
+        });
       },
       onSelectionUpdate: ({ editor: editorInstance }) => {
         if (!documentId) {
@@ -259,10 +509,22 @@ export const EditorSurface = ({
         ensureTrailingParagraphAfterSelectionBlock(editorInstance, PERSISTENT_BLOCK_NAMES);
       }
     },
-    [documentId, provider]
+    [clearSuggestionHideTimeout, collaborationEnabled, documentId, editable, onCreateSuggestion, queueSuggestionPopoverHide, provider, updateStats]
   );
 
   const safeEditor = documentId ? editor : null;
+
+  useEffect(() => {
+    if (!safeEditor) {
+      return;
+    }
+
+    safeEditor.view.dispatch(
+      safeEditor.state.tr.setMeta(suggestionDecorationsKey, {
+        suggestions
+      })
+    );
+  }, [safeEditor, suggestions]);
 
   useEffect(() => {
     if (!safeEditor || !provider) {
@@ -290,18 +552,33 @@ export const EditorSurface = ({
     if (!safeEditor) {
       return;
     }
-
     const hydrationKey = `${documentId ?? "local"}:${contentVersion}`;
     if (lastHydratedKey.current === hydrationKey) {
       return;
     }
 
+    clearAllSuggestionMarks(safeEditor);
+    safeEditor.view.dispatch(
+      safeEditor.state.tr.setMeta(suggestionDecorationsKey, {
+        suggestions: []
+      })
+    );
+
+    setActiveSuggestionId(null);
+    setSuggestionPopover(null);
+    setSuggestionReviewError(null);
+    clearSuggestionHideTimeout();
+    isApplyingSuggestionRef.current = false;
+    lastSuggestionSignatureRef.current = null;
+
     const safeContent = sanitizeTipTapContent(content ?? EMPTY_TIPTAP_DOC);
     safeEditor.commands.setContent(safeContent, false);
+    clearAllSuggestionMarks(safeEditor);
+
     safeEditor.commands.focus("end");
     lastHydratedKey.current = hydrationKey;
     updateStats(safeEditor);
-  }, [safeEditor, content, documentId, contentVersion, updateStats]);
+  }, [safeEditor, content, documentId, contentVersion, updateStats, clearSuggestionHideTimeout]);
 
   useEffect(() => {
     if (!safeEditor) {
@@ -442,6 +719,53 @@ export const EditorSurface = ({
     }
   }, [hideToolbar]);
 
+  useEffect(() => {
+    if (suggestions.length === 0) {
+      setActiveSuggestionId(null);
+      setSuggestionPopover(null);
+    }
+  }, [suggestions]);
+
+  useEffect(() => {
+    if (!activeSuggestionId || activeSuggestion) {
+      return;
+    }
+
+    setActiveSuggestionId(null);
+    setSuggestionPopover(null);
+  }, [activeSuggestion, activeSuggestionId]);
+
+  useEffect(() => {
+    setSuggestionReviewError(null);
+  }, [activeSuggestionId]);
+
+  const handleSuggestionAction = useCallback(
+    async (action: "accept" | "reject") => {
+      if (!activeSuggestion || !onSuggestionReview || !safeEditor || isReviewingSuggestion || !canReviewSuggestions) {
+        return;
+      }
+
+      setIsReviewingSuggestion(true);
+      setSuggestionReviewError(null);
+      try {
+        isApplyingSuggestionRef.current = true;
+        applySuggestionResolution(safeEditor, activeSuggestion, action);
+        await onSuggestionReview(activeSuggestion.id, action);
+        setActiveSuggestionId(null);
+        setSuggestionPopover(null);
+      } catch (error) {
+        setSuggestionReviewError(error instanceof Error ? error.message : "Failed to review suggestion");
+      } finally {
+        queueSuggestionPopoverHide();
+        window.setTimeout(() => {
+          isApplyingSuggestionRef.current = false;
+        }, 0);
+        setIsReviewingSuggestion(false);
+      }
+    },
+    [activeSuggestion, applySuggestionResolution, canReviewSuggestions, isReviewingSuggestion, onSuggestionReview, queueSuggestionPopoverHide, safeEditor]
+  );
+
   return (
     <>
       <div className="pointer-events-none sticky top-6 z-30 flex justify-center">
@@ -504,7 +828,10 @@ export const EditorSurface = ({
         </div>
       </div>
 
-      <div className="relative mx-auto my-12 min-h-[1000px] max-w-[800px] bg-white p-24 text-[#0d0e1b] dark:text-[#0d0e1b]">
+      <div
+        className="relative mx-auto my-12 min-h-[1000px] max-w-[800px] bg-white p-24 text-[#0d0e1b] dark:text-[#0d0e1b]"
+        data-testid="editor-surface"
+      >
         <article className="max-w-none">
           <div className="mb-8">
             <label className="sr-only" htmlFor="document-title">
@@ -518,6 +845,7 @@ export const EditorSurface = ({
               placeholder="Untitled document"
               readOnly={!editable}
               aria-disabled={!editable}
+              data-testid="editor-title-input"
               onChange={(event) => onTitleChange(event.target.value)}
               onKeyDown={handleTitleKeyDown}
             />
@@ -608,13 +936,59 @@ export const EditorSurface = ({
               ) : null}
             </BubbleMenuPortal>
           ) : null}
+          {activeSuggestion && editable && canReviewSuggestions ? (
+            <div
+              className="absolute z-30"
+              style={{
+                left: suggestionPopover?.left ?? 16,
+                top: suggestionPopover?.top ?? 16
+              }}
+              ref={suggestionPopoverRef}
+              onMouseEnter={() => {
+                clearSuggestionHideTimeout();
+              }}
+              onMouseLeave={queueSuggestionPopoverHide}
+            >
+              <div className="min-w-[240px] rounded-xl border border-[#d6c8ff] bg-white/95 px-3 py-2 shadow-xl shadow-[#8b5cf6]/10 backdrop-blur">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-[#8b5cf6]">
+                      Suggested {activeSuggestion.suggestionType}
+                    </p>
+                    <p className="truncate text-sm text-[#2a2150]">
+                      {activeSuggestion.author?.displayName || activeSuggestion.author?.email || "Collaborator"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                    onClick={() => void handleSuggestionAction("accept")}
+                    disabled={isReviewingSuggestion}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+                    onClick={() => void handleSuggestionAction("reject")}
+                    disabled={isReviewingSuggestion}
+                  >
+                    Reject
+                  </button>
+                </div>
+                {suggestionReviewError ? (
+                  <p className="mt-2 text-xs font-medium text-rose-600">{suggestionReviewError}</p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {loading ? (
             <p className="text-base text-[#4c4d9a] dark:text-[#8a8bbd]">Loading document...</p>
           ) : error ? (
             <p className="text-base text-red-500">{error}</p>
           ) : safeEditor && documentId ? (
-            <div className="relative">
-              <EditorContent editor={safeEditor} className="tiptap text-lg leading-relaxed" />
+            <div className="relative" data-testid="editor-content">
+              <EditorContent editor={safeEditor} className="tiptap text-lg leading-relaxed [&_[data-suggestion-id]]:cursor-pointer [&_.suggestion-decoration]:rounded-[0.35rem] [&_.suggestion-decoration]:px-0.5 [&_.suggestion-decoration]:text-[#2a2150] [&_.suggestion-decoration-insert]:bg-[#d6c8ff] [&_.suggestion-decoration-insert]:shadow-[inset_0_-1px_0_rgba(139,92,246,0.25)] [&_.suggestion-decoration-replace]:bg-[#cfe6ff] [&_.suggestion-decoration-replace]:shadow-[inset_0_-1px_0_rgba(59,130,246,0.25)] [&_.suggestion-decoration-delete-widget]:mx-1 [&_.suggestion-decoration-delete-widget]:inline-flex [&_.suggestion-decoration-delete-widget]:items-center [&_.suggestion-decoration-delete-widget]:rounded-full [&_.suggestion-decoration-delete-widget]:border [&_.suggestion-decoration-delete-widget]:border-rose-300 [&_.suggestion-decoration-delete-widget]:bg-rose-50 [&_.suggestion-decoration-delete-widget]:px-2 [&_.suggestion-decoration-delete-widget]:py-0.5 [&_.suggestion-decoration-delete-widget]:text-xs [&_.suggestion-decoration-delete-widget]:font-medium [&_.suggestion-decoration-delete-widget]:text-rose-700 [&_.suggestion-decoration-delete-widget]:line-through" />
             </div>
           ) : null}
         </article>

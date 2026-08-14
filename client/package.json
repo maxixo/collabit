@@ -8,11 +8,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types src/test/run-tests.ts"
+    "test": "node --experimental-strip-types src/test/run-tests.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
-    "@tiptap/extension-bubble-menu": "^2.27.2",
     "@tiptap/core": "^2.27.2",
+    "@tiptap/extension-bubble-menu": "^2.27.2",
     "@tiptap/extension-collaboration": "^2.27.2",
     "@tiptap/extension-collaboration-cursor": "^2.27.2",
     "@tiptap/extension-highlight": "^2.27.2",
@@ -38,6 +41,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^8.57.0",
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/forms": "^0.5.7",
     "@types/react": "^18.3.4",
     "@types/react-dom": "^18.3.0",

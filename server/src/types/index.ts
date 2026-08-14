@@ -48,4 +48,21 @@ export interface PendingChangesSummary {
   changeTypes: string[];
 }
 
+export interface SuggestionRecord {
+  id: string;
+  documentId: string;
+  workspaceId: string;
+  authorUserId: string;
+  suggestionType: "insert" | "delete" | "replace" | "format";
+  status: "pending" | "accepted" | "rejected";
+  from: number;
+  to: number;
+  originalText: string | null;
+  suggestedText: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+}
+
 // TODO: Add shared payload types for API and WebSocket events.

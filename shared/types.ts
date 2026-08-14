@@ -87,3 +87,55 @@ export interface ServerErrorPayload {
 export interface ServerAccessDeniedPayload extends DocumentIdentity {
   reason: string;
 }
+
+export type SuggestionType = "insert" | "delete" | "replace" | "format";
+export type SuggestionStatus = "pending" | "accepted" | "rejected";
+
+export interface SuggestionRelativePositionJson {
+  type?: { client: number; clock: number } | null;
+  tname?: string | null;
+  item?: { client: number; clock: number } | null;
+  assoc?: number | null;
+}
+
+export interface SuggestionMetadata extends Record<string, unknown> {
+  anchorFrom?: SuggestionRelativePositionJson | null;
+  anchorTo?: SuggestionRelativePositionJson | null;
+  snapshotText?: string | null;
+  createdFrom?: string;
+  capturedAt?: string;
+}
+
+export interface SuggestionAuthor {
+  id: string;
+  displayName?: string;
+  email?: string;
+  image?: string | null;
+}
+
+export interface DocumentSuggestion {
+  id: string;
+  documentId: string;
+  workspaceId: string;
+  authorUserId: string;
+  suggestionType: SuggestionType;
+  status: SuggestionStatus;
+  from: number;
+  to: number;
+  originalText: string | null;
+  suggestedText: string | null;
+  metadata: SuggestionMetadata;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  author?: SuggestionAuthor;
+}
+
+export interface SuggestionBatchSummary {
+  userId: string;
+  changeCount: number;
+  firstChange: string;
+  lastChange: string;
+  changeTypes: string[];
+  user?: SuggestionAuthor;
+}

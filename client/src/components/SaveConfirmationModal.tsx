@@ -21,6 +21,8 @@ interface SaveConfirmationModalProps {
   pendingChanges: PendingChangeSummary[];
   onApplySave: () => Promise<void>;
   onSaveOnly: () => Promise<void>;
+  onAcceptSelected?: (userIds: string[]) => Promise<void>;
+  onRejectSelected?: (userIds: string[]) => Promise<void>;
   onCancel: () => void;
   isSaving?: boolean;
 }
@@ -32,6 +34,8 @@ export const SaveConfirmationModal = ({
   pendingChanges,
   onApplySave,
   onSaveOnly,
+  onAcceptSelected,
+  onRejectSelected,
   onCancel,
   isSaving = false
 }: SaveConfirmationModalProps) => {
@@ -239,6 +243,28 @@ export const SaveConfirmationModal = ({
               Version Save My Changes
             </button>
           )}
+
+          {pendingChanges.length > 0 && onAcceptSelected ? (
+            <button
+              className="flex items-center gap-2 rounded-lg bg-[#efe8ff] px-4 py-2 text-sm font-semibold text-[#6b3fd1] transition-colors hover:bg-[#e4d8ff] disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => void onAcceptSelected(Array.from(selectedUsers))}
+              type="button"
+              disabled={isSaving || selectedCount === 0}
+            >
+              Accept Selected
+            </button>
+          ) : null}
+
+          {pendingChanges.length > 0 && onRejectSelected ? (
+            <button
+              className="flex items-center gap-2 rounded-lg bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => void onRejectSelected(Array.from(selectedUsers))}
+              type="button"
+              disabled={isSaving || selectedCount === 0}
+            >
+              Reject Selected
+            </button>
+          ) : null}
 
           <button
             className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"

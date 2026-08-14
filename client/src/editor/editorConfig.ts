@@ -17,6 +17,8 @@ import type * as Y from "yjs";
 import { Link } from "./extensions/link";
 import { PersistentBlockquote } from "./extensions/persistentBlockquote";
 import { PersistentCodeBlock } from "./extensions/persistentCodeBlock";
+import { SuggestionDecorationsExtension } from "./extensions/suggestionDecorations";
+import { SuggestionMark } from "./extensions/suggestionMark";
 
 export const editorConfig = {
   placeholder: "Start typing...",
@@ -30,6 +32,7 @@ export type CollaborationConfig = {
     name: string;
     color: string;
   };
+  showSelection?: boolean;
 };
 
 export const createEditorExtensions = (options?: {
@@ -64,6 +67,8 @@ export const createEditorExtensions = (options?: {
     TaskItem.configure({
       nested: true
     }),
+    SuggestionMark,
+    SuggestionDecorationsExtension,
     Table.configure({
       resizable: true
     }),
@@ -84,7 +89,14 @@ export const createEditorExtensions = (options?: {
       extensions.push(
         CollaborationCursor.configure({
           provider: { awareness: options.collaboration.awareness },
-          user: options.collaboration.user ?? { name: "You", color: "#22c55e" }
+          user: options.collaboration.user ?? { name: "You", color: "#22c55e" },
+          selectionRender:
+            options.collaboration.showSelection === false
+              ? () => ({
+                  nodeName: "span",
+                  style: "background-color: transparent;"
+                })
+              : undefined
         })
       );
     }

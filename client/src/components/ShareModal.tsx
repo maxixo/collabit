@@ -210,10 +210,12 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={onClose}
+      data-testid="share-modal-backdrop"
     >
       <div
         className="max-w-xl w-full mx-4 bg-white dark:bg-[#16172d] rounded-2xl shadow-2xl overflow-hidden"
         onClick={(event) => event.stopPropagation()}
+        data-testid="share-modal"
       >
         <div className="flex items-center justify-between border-b border-[#e7e7f3] bg-[#f8f8fc] px-6 py-4 dark:border-[#2a2b4a] dark:bg-[#1e1f3a]">
           <div className="flex items-center gap-3">
@@ -249,6 +251,7 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
                     className="h-11 w-full rounded-lg border border-[#e7e7f3] bg-white px-3 text-sm text-[#0d0e1b] shadow-sm focus:border-primary/50 focus:outline-none dark:border-[#2a2b4a] dark:bg-[#0f1024] dark:text-[#f8f8fc]"
                     value={permission}
                     onChange={(event) => setPermission(event.target.value as SharePermissionOption)}
+                    data-testid="share-permission-select"
                   >
                     <option value="viewer">Viewer (read-only)</option>
                     <option value="editor">Editor (can edit)</option>
@@ -317,6 +320,7 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
                   onClick={handleGenerate}
                   type="button"
                   disabled={isGenerating}
+                  data-testid="share-generate-button"
                 >
                   <span className="material-symbols-outlined !text-[18px]">
                     {isGenerating ? "hourglass_top" : "link"}
@@ -341,6 +345,7 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
                     type="text"
                     value={generatedLink}
                     onFocus={(event) => event.target.select()}
+                    data-testid="share-generated-link-input"
                   />
                   <button
                     className="flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 sm:w-36"

@@ -25,6 +25,15 @@ import {
   markAllChangesApplied,
   markChangesApplied
 } from "../services/changeEvent.service.js";
+import {
+  acceptSuggestions,
+  createSuggestion,
+  getPendingSuggestionSummary,
+  getSuggestionById,
+  listSuggestions,
+  rejectSuggestions,
+  resolveSuggestionsByAuthor
+} from "../services/suggestion.service.js";
 import { canEditDocument, getDocumentRole } from "../services/permission.service.js";
 import {
   generateShareToken,
@@ -126,7 +135,7 @@ documentRoutes.post("/:id/share", async (req: AuthenticatedRequest, res, next) =
       return;
     }
     const role = await getDocumentRole(userId, req.params.id, workspaceId);
-    if (!canEditDocument(role)) {
+    if (role !== "owner") {
       res.status(403).json({ message: "Access denied" });
       return;
     }
@@ -634,6 +643,176 @@ documentRoutes.get("/:id/pending-changes", async (req: AuthenticatedRequest, res
 
     const pendingChanges = await getPendingChanges(req.params.id, workspaceId);
     res.json({ pendingChanges });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.get("/:id/suggestions", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!role) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const status = typeof req.query.status === "string" ? req.query.status : "pending";
+    const suggestions = await listSuggestions(
+      req.params.id,
+      workspaceId,
+      status === "all" || status === "accepted" || status === "rejected" ? status : "pending"
+    );
+    const pendingChanges = await getPendingSuggestionSummary(req.params.id, workspaceId);
+    res.json({ suggestions, pendingChanges });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.post("/:id/suggestions", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!canEditDocument(role)) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const { suggestionType, from, to, originalText, suggestedText, metadata } = req.body as {
+      suggestionType?: "insert" | "delete" | "replace" | "format";
+      from?: number;
+      to?: number;
+      originalText?: string | null;
+      suggestedText?: string | null;
+      metadata?: Record<string, unknown>;
+    };
+
+    if (!suggestionType || typeof from !== "number" || typeof to !== "number") {
+      res.status(400).json({ message: "suggestionType, from, and to are required" });
+      return;
+    }
+
+    const suggestion = await createSuggestion({
+      documentId: req.params.id,
+      workspaceId,
+      authorUserId: userId,
+      suggestionType,
+      from,
+      to,
+      originalText,
+      suggestedText,
+      metadata
+    });
+
+    res.status(201).json({ suggestion });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.get("/:id/suggestions/:suggestionId", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!role) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const suggestion = await getSuggestionById(req.params.suggestionId, req.params.id, workspaceId);
+    if (!suggestion) {
+      res.status(404).json({ message: "Suggestion not found" });
+      return;
+    }
+
+    res.json({ suggestion });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentRoutes.post("/:id/suggestions/review", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    if (!workspaceId) {
+      res.status(400).json({ message: "workspaceId is required" });
+      return;
+    }
+
+    const userId = requireUserId(req, res);
+    if (!userId) {
+      return;
+    }
+
+    const role = await getDocumentRole(userId, req.params.id, workspaceId);
+    if (!canEditDocument(role)) {
+      res.status(403).json({ message: "Access denied" });
+      return;
+    }
+
+    const { action, suggestionIds, authorUserIds } = req.body as {
+      action?: "accept" | "reject";
+      suggestionIds?: string[];
+      authorUserIds?: string[];
+    };
+
+    if (action !== "accept" && action !== "reject") {
+      res.status(400).json({ message: "action must be accept or reject" });
+      return;
+    }
+
+    if (Array.isArray(suggestionIds) && suggestionIds.length > 0) {
+      const suggestions = action === "accept"
+        ? await acceptSuggestions(suggestionIds, req.params.id, workspaceId, userId)
+        : await rejectSuggestions(suggestionIds, req.params.id, workspaceId, userId);
+      res.json({ suggestions, resolvedCount: suggestions.length });
+      return;
+    }
+
+    if (Array.isArray(authorUserIds) && authorUserIds.length > 0) {
+      const resolvedCount = await resolveSuggestionsByAuthor(
+        authorUserIds,
+        req.params.id,
+        workspaceId,
+        action === "accept" ? "accepted" : "rejected",
+        userId
+      );
+      res.json({ resolvedCount });
+      return;
+    }
+
+    res.status(400).json({ message: "suggestionIds or authorUserIds are required" });
   } catch (error) {
     next(error);
   }
