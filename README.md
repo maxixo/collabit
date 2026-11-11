@@ -24,7 +24,7 @@ The release target is a Vercel frontend and one Node backend process on a VPS. C
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22.20.x (use `.nvmrc`; the test scripts require Node's TypeScript support)
 - PostgreSQL
 
 ### Environment
@@ -63,6 +63,7 @@ npm run dev
 
 ```bash
 npm run lint
+npm run typecheck
 npm run test
 npm run build
 ```

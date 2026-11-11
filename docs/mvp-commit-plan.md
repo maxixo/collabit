@@ -21,7 +21,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | Done | ID | Proposed commit message | Milestone |
 | --- | --- | --- | --- |
 | [x] | C00 | `docs(mvp): record commit-based completion roadmap` | Planning |
-| [ ] | C01 | `fix(tooling): enforce frontend types and align Node runtimes` | Reliable checks |
+| [x] | C01 | `fix(tooling): enforce frontend types and align Node runtimes` | Reliable checks |
 | [ ] | C02 | `fix(db): make migrations standalone and coordinated` | Reliable checks |
 | [ ] | C03 | `test(mvp): add isolated database and browser test stack` | Reliable checks |
 | [ ] | C04 | `fix(offline): isolate cached data and replay by account` | Data safety |
@@ -199,7 +199,8 @@ Add entries here as implementation commits land. The planning document itself do
 
 | Plan ID | Commit hash | Commands/scenarios checked | Outcome / remaining limitation |
 | --- | --- | --- | --- |
-| C00 | This planning commit; resolved by its unique commit message. | Documentation links, 18 commit entries, ignore exceptions, and staged whitespace/scope review. | Passed; earlier application edits excluded. |
+| C00 | `a083302` | Documentation links, 18 commit entries, ignore exceptions, and staged whitespace/scope review. | Passed; earlier application edits excluded. |
+| C01 | This tooling commit; resolved by its unique commit message. | Fresh `npm ci --no-audit --no-fund`; lint; typecheck for all three workspaces; 13 helper tests; production builds. | Passed on Node 22.20.0. Six existing Fast Refresh warnings, stale Browserslist data, and editor bundle size warning remain. Sandbox blocked esbuild; the build passed with process execution allowed. |
 
 ## First commit staging boundary
 

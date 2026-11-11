@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --experimental-strip-types src/test/run-tests.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

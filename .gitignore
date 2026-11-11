@@ -12,7 +12,6 @@ docs/*
 docs/**/*.md
 !docs/mvp-completion-plan.md
 !docs/mvp-commit-plan.md
-.github/
 .kilo/
 playwright-report/
 test-results/
