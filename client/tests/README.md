@@ -1,5 +1,7 @@
 # Isolated MVP tests
 
+`npm test` also runs IndexedDB ownership/search and late-response regressions using `fake-indexeddb`. The browser account-isolation case exercises real IndexedDB, cookies, API requests, and A -> B -> A queued replay. Legacy `collab-editor` data is never assigned to a new login; Profile offers a deliberate unassigned export instead.
+
 Run `npm ci` from the repository root, then install the locked browser revision:
 
 ```sh

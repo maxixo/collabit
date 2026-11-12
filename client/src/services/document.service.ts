@@ -1,3 +1,4 @@
+import { accountFetch, responseAccount } from "../offline/accountScope";
 import {
   getDocument as getCachedDocument,
   listDocumentsByWorkspace,
@@ -26,7 +27,9 @@ export type DocumentAccessRole = "viewer" | "editor" | "owner";
 const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? "http://localhost:4000";
 
 const parseJson = async <T>(response: Response): Promise<T> => {
+  responseAccount(response);
   const data = (await response.json()) as T;
+  responseAccount(response);
   if (!response.ok) {
     const message =
       (data as { message?: string }).message ?? "Document request failed";
@@ -57,13 +60,14 @@ const buildDocumentUrl = (id: string, workspaceId?: string, shareToken?: string)
 
 export const fetchDocuments = async (workspaceId: string): Promise<DocumentSummary[]> => {
   try {
-    const response = await fetch(
+    const response = await accountFetch(
       `${API_BASE_URL}/api/documents?workspaceId=${encodeURIComponent(workspaceId)}`,
       { credentials: "include" }
     );
     const data = await parseJson<{ documents: DocumentSummary[] }>(response);
     const documents = data.documents ?? [];
-    await safeStore(() => saveDocuments(documents));
+    await safeStore(() => saveDocuments(documents, responseAccount(response)));
+    responseAccount(response);
     return documents;
   } catch (error) {
     if (!navigator.onLine) {
@@ -75,13 +79,14 @@ export const fetchDocuments = async (workspaceId: string): Promise<DocumentSumma
 
 export const fetchStarredDocuments = async (workspaceId: string): Promise<DocumentSummary[]> => {
   try {
-    const response = await fetch(
+    const response = await accountFetch(
       `${API_BASE_URL}/api/documents/starred?workspaceId=${encodeURIComponent(workspaceId)}`,
       { credentials: "include" }
     );
     const data = await parseJson<{ documents: DocumentSummary[] }>(response);
     const documents = data.documents ?? [];
-    await safeStore(() => saveDocuments(documents));
+    await safeStore(() => saveDocuments(documents, responseAccount(response)));
+    responseAccount(response);
     return documents;
   } catch (error) {
     if (!navigator.onLine) {
@@ -93,18 +98,19 @@ export const fetchStarredDocuments = async (workspaceId: string): Promise<Docume
 };
 
 export const fetchSharedDocuments = async (workspaceId: string): Promise<DocumentSummary[]> => {
-  const response = await fetch(
+  const response = await accountFetch(
     `${API_BASE_URL}/api/documents/shared?workspaceId=${encodeURIComponent(workspaceId)}`,
     { credentials: "include" }
   );
   const data = await parseJson<{ documents: DocumentSummary[] }>(response);
   const documents = data.documents ?? [];
-  await safeStore(() => saveDocuments(documents));
-  return documents;
+  await safeStore(() => saveDocuments(documents, responseAccount(response)));
+  responseAccount(response);
+    return documents;
 };
 
 export const fetchTrashDocuments = async (workspaceId: string): Promise<DocumentSummary[]> => {
-  const response = await fetch(
+  const response = await accountFetch(
     `${API_BASE_URL}/api/documents/trash?workspaceId=${encodeURIComponent(workspaceId)}`,
     { credentials: "include" }
   );
@@ -116,7 +122,7 @@ export const moveDocumentToTrash = async (
   documentId: string,
   workspaceId: string
 ): Promise<{ documentId: string; trashed: boolean }> => {
-  const response = await fetch(
+  const response = await accountFetch(
     `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/trash?workspaceId=${encodeURIComponent(
       workspaceId
     )}`,
@@ -133,7 +139,7 @@ export const restoreDocument = async (
   documentId: string,
   workspaceId: string
 ): Promise<{ documentId: string; restored: boolean }> => {
-  const response = await fetch(
+  const response = await accountFetch(
     `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/restore?workspaceId=${encodeURIComponent(
       workspaceId
     )}`,
@@ -150,7 +156,7 @@ export const permanentlyDeleteDocument = async (
   documentId: string,
   workspaceId: string
 ): Promise<{ documentId: string; deleted: boolean }> => {
-  const response = await fetch(
+  const response = await accountFetch(
     `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}?workspaceId=${encodeURIComponent(
       workspaceId
     )}`,
@@ -166,7 +172,7 @@ export const permanentlyDeleteDocument = async (
 export const emptyTrash = async (
   workspaceId: string
 ): Promise<{ deletedCount: number }> => {
-  const response = await fetch(
+  const response = await accountFetch(
     `${API_BASE_URL}/api/documents/trash?workspaceId=${encodeURIComponent(workspaceId)}`,
     {
       method: "DELETE",
@@ -183,7 +189,7 @@ export const fetchDocumentById = async (
   options?: { signal?: AbortSignal; shareToken?: string }
 ): Promise<DocumentDetail | null> => {
   try {
-    const response = await fetch(
+    const response = await accountFetch(
       buildDocumentUrl(id, workspaceId, options?.shareToken),
       { credentials: "include", signal: options?.signal }
     );
@@ -203,8 +209,9 @@ export const fetchDocumentById = async (
         }
       : null;
     if (document) {
-      await safeStore(() => saveDocument(document));
+      await safeStore(() => saveDocument(document, responseAccount(response)));
     }
+    responseAccount(response);
     return document;
   } catch (error) {
     if (!navigator.onLine) {
@@ -218,7 +225,7 @@ export const toggleStarDocument = async (
   documentId: string,
   workspaceId: string
 ): Promise<{ documentId: string; isStarred: boolean }> => {
-  const response = await fetch(
+  const response = await accountFetch(
     `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/star?workspaceId=${encodeURIComponent(
       workspaceId
     )}`,
@@ -237,7 +244,7 @@ export const createDocument = async (payload: {
   content?: TipTapContent;
   workspaceId: string;
 }): Promise<DocumentDetail> => {
-  const response = await fetch(`${API_BASE_URL}/api/documents`, {
+  const response = await accountFetch(`${API_BASE_URL}/api/documents`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -246,8 +253,9 @@ export const createDocument = async (payload: {
 
   const data = await parseJson<{ document: DocumentDetail }>(response);
   if (data.document) {
-    await safeStore(() => saveDocument(data.document));
+    await safeStore(() => saveDocument(data.document, responseAccount(response)));
   }
+  responseAccount(response);
   return data.document;
 };
 
@@ -257,7 +265,7 @@ export const updateDocument = async (payload: {
   title?: string;
   content?: TipTapContent;
 }, options?: { signal?: AbortSignal; shareToken?: string }): Promise<DocumentDetail> => {
-  const response = await fetch(
+  const response = await accountFetch(
     buildDocumentUrl(payload.id, payload.workspaceId, options?.shareToken),
     {
       method: "PATCH",
@@ -273,7 +281,8 @@ export const updateDocument = async (payload: {
 
   const data = await parseJson<{ document: DocumentDetail }>(response);
   if (data.document) {
-    await safeStore(() => saveDocument(data.document));
+    await safeStore(() => saveDocument(data.document, responseAccount(response)));
   }
+  responseAccount(response);
   return data.document;
 };

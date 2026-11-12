@@ -4,10 +4,20 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode
 } from "react";
 import { clearRedirectPath, readRedirectPath } from "./redirect";
+import { setOfflineAccount, subscribeToAccountChange } from "../offline/accountScope";
+import { destroyAllYjsProviders } from "../collaboration/yjsProvider";
+
+subscribeToAccountChange(() => {
+  destroyAllYjsProviders();
+  if (typeof caches !== "undefined") void caches.keys().then((keys) =>
+    Promise.all(keys.filter((key) => key.startsWith("editor-api-")).map((key) => caches.delete(key)))
+  );
+});
 
 export const DEFAULT_AUTH_REDIRECT_PATH = "/editor/recent?workspaceId=default";
 
@@ -24,6 +34,7 @@ type AuthContextValue = {
   status: AuthStatus;
   user: AuthUser | null;
   refresh: () => Promise<void>;
+  signOut: () => Promise<void>;
   getRedirectPath: (fallback?: string) => string;
 };
 
@@ -89,8 +100,22 @@ const parseSessionUser = (payload: unknown): AuthUser | null => {
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [user, setUser] = useState<AuthUser | null>(null);
+  const sequence = useRef(0);
+  const channel = useRef<BroadcastChannel | null>(null);
+  const confirmedUserId = useRef<string | null>(null);
+  const localLogout = useRef(false);
+  const commitSession = useCallback((nextUser: AuthUser | null) => {
+    const id = nextUser?.id ?? null;
+    setOfflineAccount(id);
+    setUser(nextUser);
+    setStatus(nextUser ? "authenticated" : "unauthenticated");
+    if (confirmedUserId.current !== id) channel.current?.postMessage("invalidate");
+    confirmedUserId.current = id;
+  }, []);
 
   const refresh = useCallback(async () => {
+    localLogout.current = false;
+    const attempt = ++sequence.current;
     setStatus((prev) => (prev === "authenticated" ? prev : "loading"));
 
     try {
@@ -106,29 +131,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         payload = null;
       }
 
-      if (!response.ok) {
-        setUser(null);
-        setStatus("unauthenticated");
-        return;
-      }
-
-      const nextUser = parseSessionUser(payload);
-      if (!nextUser) {
-        setUser(null);
-        setStatus("unauthenticated");
-        return;
-      }
-
-      setUser(nextUser);
-      setStatus("authenticated");
+      if (attempt === sequence.current) commitSession(response.ok ? parseSessionUser(payload) : null);
     } catch {
-      setUser(null);
-      setStatus("unauthenticated");
+      if (attempt === sequence.current) commitSession(null);
     }
+  }, [commitSession]);
+
+  const signOut = useCallback(async () => {
+    sequence.current++;
+    localLogout.current = true;
+    setOfflineAccount(null);
+    setUser(null);
+    setStatus("unauthenticated");
+    confirmedUserId.current = null;
+    const response = await fetch(`${API_BASE_URL}/api/auth/logout`, { method: "POST", credentials: "include" });
+    if (response.ok) channel.current?.postMessage("invalidate");
   }, []);
 
   useEffect(() => {
+    if (typeof BroadcastChannel !== "undefined") {
+      channel.current = new BroadcastChannel("collabit-auth");
+      channel.current.onmessage = () => {
+        setOfflineAccount(null);
+        setStatus("loading");
+        void refresh();
+      };
+    }
+    const revalidate = () => { if (!localLogout.current) void refresh(); };
+    window.addEventListener("focus", revalidate);
     void refresh();
+    return () => {
+      channel.current?.close();
+      window.removeEventListener("focus", revalidate);
+    };
   }, [refresh]);
 
   const getRedirectPath = useCallback((fallback = DEFAULT_AUTH_REDIRECT_PATH) => {
@@ -145,9 +180,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       status,
       user,
       refresh,
+      signOut,
       getRedirectPath
     }),
-    [status, user, refresh, getRedirectPath]
+    [status, user, refresh, signOut, getRedirectPath]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

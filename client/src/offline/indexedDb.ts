@@ -1,195 +1,112 @@
 import type { DocumentState } from "../types";
+import { getOfflineAccount } from "./accountScope";
 
-export type StoredDocument = Omit<DocumentState, "content"> & {
-  content?: DocumentState["content"];
+export type StoredDocument = Omit<DocumentState, "content"> & { content?: DocumentState["content"] };
+export type OfflineOperation = { id: string; documentId: string; workspaceId?: string; payload: unknown; createdAt: number };
+const databases = new Map<string, Promise<IDBDatabase>>();
+
+export const accountDatabaseName = (userId: string) => "collab-editor:user:" + encodeURIComponent(userId);
+export const openEditorDb = (account = getOfflineAccount()): Promise<IDBDatabase> => {
+  const name = accountDatabaseName(account.userId);
+  let pending = databases.get(name);
+  if (!pending) {
+    pending = new Promise((resolve, reject) => {
+      const request = indexedDB.open(name, 3);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        const documents = db.createObjectStore("documents", { keyPath: "id" });
+        documents.createIndex("by_workspace", "workspaceId");
+        const operations = db.createObjectStore("operations", { keyPath: "id" });
+        operations.createIndex("by_created_at", "createdAt");
+        operations.createIndex("by_document", "documentId");
+        db.createObjectStore("meta", { keyPath: "key" });
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => { db.close(); databases.delete(name); };
+        resolve(db);
+      };
+      request.onerror = () => { databases.delete(name); reject(request.error); };
+    });
+    databases.set(name, pending);
+  }
+  return pending;
 };
 
-export type OfflineOperation = {
-  id: string;
-  documentId: string;
-  workspaceId?: string;
-  payload: unknown;
-  createdAt: number;
-};
-
-type MetaRecord = {
-  key: string;
-  value: unknown;
-  updatedAt: number;
-};
-
-const DB_NAME = "collab-editor";
-const DB_VERSION = 3;
-const DOCUMENT_STORE = "documents";
-const OPERATIONS_STORE = "operations";
-const META_STORE = "meta";
-
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-const resolveRequest = <T>(request: IDBRequest<T>): Promise<T> =>
-  new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
-  });
-
-const runTransaction = async <T>(
-  storeName: string,
-  mode: IDBTransactionMode,
-  run: (store: IDBObjectStore) => IDBRequest<T>
+export const transaction = async <T>(
+  storeName: string, mode: IDBTransactionMode,
+  action: (store: IDBObjectStore) => IDBRequest<T>, account = getOfflineAccount()
 ): Promise<T> => {
-  const db = await openEditorDb();
+  const db = await openEditorDb(account);
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, mode);
-    const store = tx.objectStore(storeName);
-    const request = run(store);
+    let request: IDBRequest<T>;
+    try { request = action(tx.objectStore(storeName)); }
+    catch (error) { tx.abort(); reject(error); return; }
     let result: T;
-
-    request.onsuccess = () => {
-      result = request.result;
-    };
-
-    request.onerror = () => {
-      reject(request.error ?? new Error("IndexedDB request failed"));
-    };
-
+    request.onsuccess = () => { result = request.result; };
     tx.oncomplete = () => resolve(result);
-    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+    tx.onabort = tx.onerror = () => reject(tx.error ?? request.error ?? new Error("Local storage transaction failed"));
   });
 };
 
-export const openEditorDb = (): Promise<IDBDatabase> => {
-  if (dbPromise) {
-    return dbPromise;
-  }
+export const saveDocument = async (document: StoredDocument, account = getOfflineAccount()) => {
+  const existing = await getDocumentRecord(document.id, account);
+  await transaction("documents", "readwrite", (store) => store.put({ ...existing, ...document }), account);
+};
+export const saveDocuments = async (documents: StoredDocument[], account = getOfflineAccount()) => {
+  await Promise.all(documents.map((document) => saveDocument(document, account)));
+};
+export const getDocumentRecord = async (id: string, account = getOfflineAccount()): Promise<StoredDocument | null> =>
+  (await transaction("documents", "readonly", (store) => store.get(id), account)) ?? null;
+export const getDocument = async (id: string, account = getOfflineAccount()): Promise<DocumentState | null> => {
+  const document = await getDocumentRecord(id, account);
+  return document?.content ? document as DocumentState : null;
+};
+export const updateCachedDocumentStar = async (id: string, isStarred: boolean, fallback?: StoredDocument, account = getOfflineAccount()) => {
+  const record = await getDocumentRecord(id, account);
+  if (record || fallback) await saveDocument({ ...(record ?? fallback!), isStarred }, account);
+};
+export const listDocumentsByWorkspace = async (workspaceId: string, account = getOfflineAccount()): Promise<StoredDocument[]> =>
+  transaction("documents", "readonly", (store) => store.index("by_workspace").getAll(IDBKeyRange.only(workspaceId)), account);
+export const saveOperation = async (operation: OfflineOperation, account = getOfflineAccount()) => {
+  await transaction("operations", "readwrite", (store) => store.put(operation), account);
+};
+export const listOperations = async (account = getOfflineAccount()): Promise<OfflineOperation[]> => {
+  const items: OfflineOperation[] = await transaction("operations", "readonly", (store) => store.getAll(), account);
+  return items.sort((a, b) => a.createdAt - b.createdAt);
+};
+export const removeOperation = async (id: string, account = getOfflineAccount()) => {
+  await transaction("operations", "readwrite", (store) => store.delete(id), account);
+};
+export const clearOperations = async (account = getOfflineAccount()) => {
+  await transaction("operations", "readwrite", (store) => store.clear(), account);
+};
+export const setMeta = async (key: string, value: unknown, account = getOfflineAccount()) => {
+  await transaction("meta", "readwrite", (store) => store.put({ key, value, updatedAt: Date.now() }), account);
+};
+export const getMeta = async <T = unknown>(key: string, account = getOfflineAccount()): Promise<T | null> => {
+  const record = await transaction("meta", "readonly", (store) => store.get(key), account);
+  return record?.value ?? null;
+};
 
-  dbPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      const transaction = request.transaction;
-
-      const documentsStore = db.objectStoreNames.contains(DOCUMENT_STORE)
-        ? transaction!.objectStore(DOCUMENT_STORE)
-        : db.createObjectStore(DOCUMENT_STORE, { keyPath: "id" });
-
-      if (!documentsStore.indexNames.contains("by_workspace")) {
-        documentsStore.createIndex("by_workspace", "workspaceId", { unique: false });
-      }
-
-      const operationsStore = db.objectStoreNames.contains(OPERATIONS_STORE)
-        ? transaction!.objectStore(OPERATIONS_STORE)
-        : db.createObjectStore(OPERATIONS_STORE, { keyPath: "id" });
-
-      if (!operationsStore.indexNames.contains("by_created_at")) {
-        operationsStore.createIndex("by_created_at", "createdAt", { unique: false });
-      }
-
-      if (!operationsStore.indexNames.contains("by_document")) {
-        operationsStore.createIndex("by_document", "documentId", { unique: false });
-      }
-
-      if (!db.objectStoreNames.contains(META_STORE)) {
-        db.createObjectStore(META_STORE, { keyPath: "key" });
-      }
-    };
-
+// Never assign unscoped historical data to the next account that signs in.
+export const exportLegacyDrafts = async () => {
+  const known = await indexedDB.databases();
+  if (!known.some((db) => db.name === "collab-editor")) return null;
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open("collab-editor");
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB error"));
+    request.onerror = () => reject(request.error);
   });
-
-  return dbPromise;
-};
-
-export const saveDocument = async (document: StoredDocument): Promise<void> => {
-  await runTransaction(DOCUMENT_STORE, "readwrite", (store) => store.put(document));
-};
-
-export const saveDocuments = async (documents: StoredDocument[]): Promise<void> => {
-  const db = await openEditorDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(DOCUMENT_STORE, "readwrite");
-    const store = tx.objectStore(DOCUMENT_STORE);
-
-    documents.forEach((document) => {
-      store.put(document);
-    });
-
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
-  });
-};
-
-export const getDocument = async (id: string): Promise<DocumentState | null> => {
-  const result = await runTransaction(DOCUMENT_STORE, "readonly", (store) => store.get(id));
-  const document = result as StoredDocument | undefined;
-  if (!document || !document.content) {
-    return null;
-  }
-  return document as DocumentState;
-};
-
-export const getDocumentRecord = async (id: string): Promise<StoredDocument | null> => {
-  const result = await runTransaction(DOCUMENT_STORE, "readonly", (store) => store.get(id));
-  return (result as StoredDocument | undefined) ?? null;
-};
-
-export const updateCachedDocumentStar = async (
-  id: string,
-  isStarred: boolean,
-  fallback?: StoredDocument
-): Promise<void> => {
   try {
-    const record = await getDocumentRecord(id);
-    if (record) {
-      await saveDocument({ ...record, isStarred });
-      return;
-    }
-    if (fallback) {
-      await saveDocument({ ...fallback, isStarred });
-    }
-  } catch {
-    // Ignore IndexedDB failures to avoid blocking UI updates.
-  }
-};
-
-export const listDocumentsByWorkspace = async (workspaceId: string): Promise<StoredDocument[]> => {
-  const db = await openEditorDb();
-  const tx = db.transaction(DOCUMENT_STORE, "readonly");
-  const store = tx.objectStore(DOCUMENT_STORE);
-  const index = store.index("by_workspace");
-  const request = index.getAll(IDBKeyRange.only(workspaceId));
-  const result = await resolveRequest(request);
-  return Array.isArray(result) ? (result as StoredDocument[]) : [];
-};
-
-export const saveOperation = async (operation: OfflineOperation): Promise<void> => {
-  await runTransaction(OPERATIONS_STORE, "readwrite", (store) => store.put(operation));
-};
-
-export const listOperations = async (): Promise<OfflineOperation[]> => {
-  const operations = await runTransaction(OPERATIONS_STORE, "readonly", (store) => store.getAll());
-  const list = Array.isArray(operations) ? (operations as OfflineOperation[]) : [];
-  return list.sort((a, b) => a.createdAt - b.createdAt);
-};
-
-export const removeOperation = async (id: string): Promise<void> => {
-  await runTransaction(OPERATIONS_STORE, "readwrite", (store) => store.delete(id));
-};
-
-export const clearOperations = async (): Promise<void> => {
-  await runTransaction(OPERATIONS_STORE, "readwrite", (store) => store.clear());
-};
-
-export const setMeta = async (key: string, value: unknown): Promise<void> => {
-  const record: MetaRecord = { key, value, updatedAt: Date.now() };
-  await runTransaction(META_STORE, "readwrite", (store) => store.put(record));
-};
-
-export const getMeta = async <T = unknown>(key: string): Promise<T | null> => {
-  const record = await runTransaction(META_STORE, "readonly", (store) => store.get(key));
-  const entry = record as MetaRecord | undefined;
-  return entry ? (entry.value as T) : null;
+    const read = (name: string) => new Promise<unknown[]>((resolve, reject) => {
+      if (!db.objectStoreNames.contains(name)) return resolve([]);
+      const tx = db.transaction(name, "readonly");
+      const request = tx.objectStore(name).getAll();
+      tx.oncomplete = () => resolve(request.result);
+      tx.onabort = tx.onerror = () => reject(tx.error);
+    });
+    return { unassigned: true, documents: await read("documents"), operations: await read("operations") };
+  } finally { db.close(); }
 };

@@ -1,6 +1,7 @@
 import type { TipTapContent, DocumentDetail } from "../services/document.service";
 import { fetchDocumentById, updateDocument } from "../services/document.service";
 import { createOfflineQueue, type OfflineQueueItem } from "./offlineQueue";
+import { getOfflineAccount, isCurrentAccount, verifyOfflineSession } from "./accountScope";
 import {
   collapseDocumentQueueEntries,
   hasDocumentConflict,
@@ -75,13 +76,14 @@ const isConnectivityError = (error: unknown) => {
 export const subscribeToDocumentQueue = (
   handler: (event: QueueStatusEvent) => void
 ) => {
+  const account = getOfflineAccount();
   if (typeof window === "undefined") {
     return () => {};
   }
 
   const listener = (event: Event) => {
     const customEvent = event as CustomEvent<QueueStatusEvent>;
-    handler(customEvent.detail);
+    if (isCurrentAccount(account)) handler(customEvent.detail);
   };
 
   window.addEventListener(DOCUMENT_QUEUE_EVENT, listener as EventListener);
@@ -99,7 +101,8 @@ export const enqueueDocumentUpdate = async (input: {
   baseUpdatedAt?: string | null;
   shareToken?: string;
 }) => {
-  const items = await queue.list();
+  const account = getOfflineAccount();
+  const items = await queue.list(account);
   const redundantIds = items
     .filter(isDocumentQueueItem)
     .filter(
@@ -110,7 +113,7 @@ export const enqueueDocumentUpdate = async (input: {
     .map((item) => item.id);
 
   for (const id of redundantIds) {
-    await queue.remove(id);
+    await queue.remove(id, account);
   }
 
   const entry = await queue.enqueue({
@@ -125,9 +128,9 @@ export const enqueueDocumentUpdate = async (input: {
       baseUpdatedAt: input.baseUpdatedAt ?? null,
       shareToken: input.shareToken
     }
-  });
+  }, account);
 
-  emitQueueStatus({ documentId: input.documentId, status: "queued" });
+  if (isCurrentAccount(account)) emitQueueStatus({ documentId: input.documentId, status: "queued" });
   return entry;
 };
 
@@ -142,14 +145,18 @@ export const getQueuedDocumentUpdate = async (documentId: string) => {
 };
 
 export const flushDocumentQueue = async () => {
-  const items = await queue.list();
+  const account = getOfflineAccount();
+  const items = await queue.list(account);
   const documentItems = items.filter(isDocumentQueueItem);
+  if (!documentItems.length || !await verifyOfflineSession(account)) return;
   const latestEntries = collapseDocumentQueueEntries(documentItems);
 
   for (const latest of latestEntries) {
+    if (!isCurrentAccount(account)) return;
     emitQueueStatus({ documentId: latest.documentId, status: "syncing" });
 
     const result = await replayDocumentUpdate(latest);
+    if (!isCurrentAccount(account)) return;
     if (result.status === "retry") {
       emitQueueStatus({
         documentId: latest.documentId,
@@ -162,7 +169,7 @@ export const flushDocumentQueue = async () => {
     for (const entry of documentItems.filter(
       (item) => item.documentId === latest.documentId && item.workspaceId === latest.workspaceId
     )) {
-      await queue.remove(entry.id);
+      await queue.remove(entry.id, account);
     }
 
     if (result.status === "applied") {

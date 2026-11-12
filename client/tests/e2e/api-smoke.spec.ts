@@ -16,6 +16,8 @@ test('authentication and document lifecycle use the real API and database', asyn
   expect((await request.get(url)).status()).toBe(401);
   expect((await request.post(`${API_BASE_URL}/api/auth/login`, { data: { email: user.email, password: user.password } })).ok()).toBeTruthy();
   expect((await request.get(url)).ok()).toBeTruthy();
+  expect((await request.patch(url, { headers: { 'x-expected-user-id': 'a-different-account' }, data: { title: 'must not save' } })).status()).toBe(401);
+  expect((await (await request.get(url)).json()).document.title).toBe('Saved through API');
 });
 
 test('a second account cannot read a private document', async ({ playwright }) => {

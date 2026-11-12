@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { logout } from "../services/auth.service";
 
 const avatarBaseClass =
   "flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[#e7e7f3] text-sm font-bold text-[#4c4d9a] dark:border-[#2a2b4a] dark:bg-[#1e1f3a] dark:text-[#a1a1c9]";
@@ -11,7 +10,7 @@ type UserMenuProps = {
 };
 
 export const UserMenu = ({ onToggle }: UserMenuProps) => {
-  const { user, status, refresh } = useAuth();
+  const { user, status, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -71,15 +70,9 @@ export const UserMenu = ({ onToggle }: UserMenuProps) => {
     setIsOpen(false);
 
     try {
-      await logout();
+      await signOut();
     } catch {
       // Continue with local cleanup even if the request fails.
-    }
-
-    try {
-      await refresh();
-    } catch {
-      // Ignore refresh failures on logout.
     }
 
     setIsLoggingOut(false);

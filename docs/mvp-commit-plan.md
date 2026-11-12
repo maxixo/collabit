@@ -1,6 +1,6 @@
 # MVP commit roadmap
 
-Status: C00 through C03 complete. Updated 12 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
+Status: C00 through C04 complete. Updated 12 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
 
 The [completion overview](mvp-completion-plan.md) contains the full product scope and acceptance matrix. Numbers identify roadmap items; the verification record below identifies completed commits. Mark an item complete only when its changes and passing verification record are committed together.
 
@@ -24,7 +24,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | [x] | C01 | `fix(tooling): enforce frontend types and align Node runtimes` | Reliable checks |
 | [x] | C02 | `fix(db): make migrations standalone and coordinated` | Reliable checks |
 | [x] | C03 | `test(mvp): add isolated database and browser test stack` | Reliable checks |
-| [ ] | C04 | `fix(offline): isolate cached data and replay by account` | Data safety |
+| [x] | C04 | `fix(offline): isolate cached data and replay by account` | Data safety |
 | [ ] | C05 | `fix(offline): retain drafts until conflicts are resolved` | Data safety |
 | [ ] | C06 | `fix(documents): reject stale writes and make replay retry-safe` | Data safety |
 | [ ] | C07 | `fix(collaboration): persist rooms and synchronize document state` | Collaboration |
@@ -204,6 +204,8 @@ Add entries here as implementation commits land. The planning document itself do
 | C02 | This migration commit; resolve with `git log -1 --format=%h --grep="^fix(db): make migrations standalone and coordinated$"`. | `npm run ci:check`; `npm run test:migrations --workspace server` against the disposable localhost PostgreSQL cluster; documentation links and staged scope/whitespace review. | Passed on Node 22.20.0 and PostgreSQL 18.1: 13 helper tests plus 9 database regressions. Covers production startup refusing pending schema, fresh/status/repeat/concurrent runs, SQL/tracking rollback and retry, asset errors, prerequisite ordering, upgrade preservation, and CLI exit. Corrected the compiled backend/CLI layout and shared runtime imports. Existing SQL files unchanged. CI configured for disposable PostgreSQL 16; remote CI has not been run. |
 
 ## First commit staging boundary
+
+C04 verification: account-scoped IndexedDB, search/metadata and queues; abortable identity-bound requests with a matching server session guard; authenticated replay only; per-account application state and socket cleanup; legacy cache preserved as an explicit unassigned export. A clean lockfile install preserved existing dependency versions. Passed workspace typechecks/lint, 13 existing helper tests, 5 ownership/search/storage regressions, full application builds, and 8 browser/API scenarios including A -> B -> A offline draft replay. Commit C03 is `63d103f`; this account-isolation commit is resolved by its unique message. C11 still owns service-worker installation/offline startup; private API caching is disabled here.
 
 C03 verification: this test-stack commit passed 7 production-frontend API/browser scenarios (5 editor, 2 API), 13 helper tests, workspace lint/typechecks, backend builds, and a fresh frontend build. The isolated runner creates its own database/ports, retains failure evidence, and tears down its resources. Tests exposed and fixed early/recreated-editor hydration and corrected missing/stale baseline selectors. Existing unrelated edits remain in the original worktree. C03-C05 use the isolated `mvp/c03-c05` worktree based on merged main.
 

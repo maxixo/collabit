@@ -10,6 +10,7 @@ import {
 } from "../offline/documentQueue";
 import { debounce } from "../utils/debounce";
 import { sanitizeTipTapContent } from "../utils/tiptapContent";
+import { getOfflineAccount, isCurrentAccount } from "../offline/accountScope";
 
 const DEFAULT_AUTOSAVE_MS = 1200;
 
@@ -63,6 +64,7 @@ export const useDocument = (
   workspaceId?: string,
   options?: { shareToken?: string }
 ) => {
+  const account = getOfflineAccount();
   const [document, setDocument] = useState<DocumentState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +82,7 @@ export const useDocument = (
 
   const queueDocumentUpdate = useCallback(
     async (next: DocumentState, saveId: number) => {
+      if (!isCurrentAccount(account)) return;
       if (!documentId || !workspaceId) {
         return;
       }
@@ -99,11 +102,12 @@ export const useDocument = (
         setSaveError(null);
       }
     },
-    [documentId, shareToken, workspaceId]
+    [documentId, shareToken, workspaceId, account]
   );
 
   const persistDocument = useCallback(
     async (next: DocumentState, saveId: number) => {
+      if (!isCurrentAccount(account)) return;
       if (!documentId || !workspaceId) {
         return;
       }
@@ -164,7 +168,7 @@ export const useDocument = (
         }
       }
     },
-    [documentId, queueDocumentUpdate, shareToken, workspaceId]
+    [documentId, queueDocumentUpdate, shareToken, workspaceId, account]
   );
 
   const debouncedPersist = useMemo(() => {
@@ -228,7 +232,7 @@ export const useDocument = (
           signal: nextController.signal,
           shareToken
         });
-        if (!isMounted) {
+        if (!isMounted || !isCurrentAccount(account)) {
           return;
         }
 
@@ -246,6 +250,7 @@ export const useDocument = (
         lastSyncedDocumentRef.current = nextDocument;
 
         const queuedDraft = await getQueuedDocumentUpdate(documentId);
+        if (!isMounted || !isCurrentAccount(account)) return;
         const hydratedDocument = applyQueuedDraft(nextDocument, queuedDraft);
 
         setDocument(hydratedDocument);
@@ -253,7 +258,7 @@ export const useDocument = (
           setSaveStatus(navigator.onLine ? "queued" : "offline");
         }
 
-        void cacheDocument(hydratedDocument).catch(() => undefined);
+        void cacheDocument(hydratedDocument, account).catch(() => undefined);
         void indexDocument(hydratedDocument);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
@@ -278,7 +283,7 @@ export const useDocument = (
       }
       cancelPendingSave();
     };
-  }, [cancelPendingSave, documentId, reloadNonce, shareToken, workspaceId]);
+  }, [cancelPendingSave, documentId, reloadNonce, shareToken, workspaceId, account]);
 
   useEffect(() => {
     if (!documentId) {
@@ -324,7 +329,7 @@ export const useDocument = (
         setConflictState(null);
         setSaveStatus("saved");
         setSaveError(null);
-        void cacheDocument(normalized).catch(() => undefined);
+        void cacheDocument(normalized, account).catch(() => undefined);
         void indexDocument(normalized);
         return;
       }
@@ -348,7 +353,7 @@ export const useDocument = (
         setSaveError(event.message);
       }
     });
-  }, [documentId]);
+  }, [documentId, account]);
 
   useEffect(() => {
     if (!documentId) {
@@ -381,7 +386,7 @@ export const useDocument = (
       }
 
       setDocument(next);
-      void cacheDocument(next).catch(() => undefined);
+      void cacheDocument(next, account).catch(() => undefined);
       saveCounterRef.current += 1;
       const saveId = saveCounterRef.current;
       pendingSaveRef.current = saveId;
@@ -389,7 +394,7 @@ export const useDocument = (
       debouncedPersist(next, saveId);
       debouncedIndexUpdate(next);
     },
-    [debouncedIndexUpdate, debouncedPersist]
+    [debouncedIndexUpdate, debouncedPersist, account]
   );
 
   const setLocalDocument = useCallback(
@@ -400,12 +405,12 @@ export const useDocument = (
             ? (next as (value: DocumentState | null) => DocumentState | null)(current)
             : next;
         if (resolved) {
-          void cacheDocument(resolved).catch(() => undefined);
+          void cacheDocument(resolved, account).catch(() => undefined);
         }
         return resolved;
       });
     },
-    []
+    [account]
   );
 
   const clearConflict = useCallback(() => {

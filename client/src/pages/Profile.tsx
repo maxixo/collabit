@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { updateProfile, validateProfileUpdate } from "../services/user.service";
 import { WorkspaceProvider, useWorkspace } from "../workspace/WorkspaceContext";
+import { exportLegacyDrafts } from "../offline/indexedDb";
 
 const ProfileContent = ({ workspaceId }: { workspaceId: string }) => {
   const { user, status, refresh } = useAuth();
@@ -155,6 +156,15 @@ const ProfileContent = ({ workspaceId }: { workspaceId: string }) => {
               </button>
             </div>
           </form>
+          <button type="button" className="mt-4 text-sm underline" onClick={() => {
+            void exportLegacyDrafts().then((drafts) => {
+              if (!drafts) { setSuccessMessage("No earlier local drafts were found."); return; }
+              const url = URL.createObjectURL(new Blob([JSON.stringify(drafts, null, 2)], { type: "application/json" }));
+              const link = document.createElement("a"); link.href = url; link.download = "unassigned-local-drafts.json"; link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+              setSuccessMessage("Earlier drafts downloaded. Review ownership before reusing them.");
+            }).catch(() => setFormError("Unable to export earlier local drafts."));
+          }}>Download drafts from an earlier version</button>
         </section>
 
         <aside className="grid gap-4">

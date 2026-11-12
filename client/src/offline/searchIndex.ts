@@ -3,6 +3,7 @@ import type { DocumentState } from "../types";
 import { getMeta, listDocumentsByWorkspace, setMeta } from "./indexedDb";
 import { getTipTapText } from "../utils/tiptapContent";
 import { debounce } from "../utils/debounce";
+import { getOfflineAccount, isCurrentAccount, subscribeToAccountChange, type OfflineAccount } from "./accountScope";
 
 export type SearchResult = {
   id: string;
@@ -54,11 +55,18 @@ const lastIndexedContent = new Map<string, string>();
 const persistQueue = new Map<string, ReturnType<typeof debounce>>();
 const hydratedFromCache = new Set<string>();
 
+export const resetSearchState = () => {
+  persistQueue.forEach((pending) => pending.cancel());
+  indexCache.clear(); lastIndexedContent.clear(); persistQueue.clear(); hydratedFromCache.clear();
+};
+subscribeToAccountChange(resetSearchState);
+
 const getIndexKey = (workspaceId: string) => `${INDEX_META_PREFIX}${workspaceId}`;
 const serializeIndexSnapshot = (index: SerializedIndex | string) =>
   typeof index === "string" ? index : JSON.stringify(index);
 
 const getIndex = async (workspaceId: string): Promise<MiniSearch<IndexedDocument>> => {
+  const account = getOfflineAccount();
   if (indexCache.has(workspaceId)) {
     return indexCache.get(workspaceId)!;
   }
@@ -66,11 +74,12 @@ const getIndex = async (workspaceId: string): Promise<MiniSearch<IndexedDocument
   let stored: StoredIndexSnapshot | null = null;
   try {
     const key = getIndexKey(workspaceId) as string;
-    stored = await getMeta<StoredIndexSnapshot>(key);
+    stored = await getMeta<StoredIndexSnapshot>(key, account);
   } catch {
     stored = null;
   }
 
+  if (!isCurrentAccount(account)) throw new DOMException("Account changed", "AbortError");
   if (stored?.index && stored.version === INDEX_VERSION) {
     try {
       const restored = MiniSearch.loadJSON(serializeIndexSnapshot(stored.index), {
@@ -90,7 +99,8 @@ const getIndex = async (workspaceId: string): Promise<MiniSearch<IndexedDocument
   return fresh;
 };
 
-const persistIndex = async (workspaceId: string, index: MiniSearch<IndexedDocument>): Promise<void> => {
+const persistIndex = async (workspaceId: string, index: MiniSearch<IndexedDocument>, account: OfflineAccount): Promise<void> => {
+  if (!isCurrentAccount(account)) return;
   const snapshot: StoredIndexSnapshot = {
     version: INDEX_VERSION,
     workspaceId,
@@ -99,17 +109,18 @@ const persistIndex = async (workspaceId: string, index: MiniSearch<IndexedDocume
   };
   try {
     const key = getIndexKey(workspaceId) as string;
-    await setMeta(key, snapshot);
+    await setMeta(key, snapshot, account);
   } catch {
     // Ignore IndexedDB failures to avoid blocking editor updates.
   }
 };
 
 const schedulePersist = (workspaceId: string, index: MiniSearch<IndexedDocument>) => {
+  const account = getOfflineAccount();
   let schedule = persistQueue.get(workspaceId);
   if (!schedule) {
     schedule = debounce((nextIndex: unknown) => {
-      void persistIndex(workspaceId, nextIndex as MiniSearch<IndexedDocument>);
+      void persistIndex(workspaceId, nextIndex as MiniSearch<IndexedDocument>, account);
     }, SAVE_DEBOUNCE_MS);
     persistQueue.set(workspaceId, schedule);
   }
@@ -131,6 +142,7 @@ const buildIndexEntry = (document: IndexableDocument): IndexedDocument => {
 const makeDocumentKey = (workspaceId: string, documentId: string) => `${workspaceId}:${documentId}`;
 
 export const indexDocument = async (document: IndexableDocument): Promise<void> => {
+  const account = getOfflineAccount();
   // Validate required fields
   if (!document.workspaceId || !document.id) {
     console.warn("[SearchIndex] Skipping document: missing workspaceId or id", document);
@@ -148,6 +160,7 @@ export const indexDocument = async (document: IndexableDocument): Promise<void> 
     }
 
     const index = await getIndex(entry.workspaceId);
+    if (!isCurrentAccount(account)) return;
     
     // Try to remove existing entry, but ignore if it doesn't exist
     const mutableIndex = index as MiniSearch<IndexedDocument> & {
@@ -173,11 +186,12 @@ export const indexDocument = async (document: IndexableDocument): Promise<void> 
     lastIndexedContent.set(cacheKey, contentKey);
     schedulePersist(entry.workspaceId, index);
   } catch (error) {
-    console.error("[SearchIndex] Failed to index document", error, document);
+    if (isCurrentAccount(account)) console.error("[SearchIndex] Failed to index document", error);
   }
 };
 
 const hydrateIndexFromCache = async (workspaceId: string): Promise<void> => {
+  const account = getOfflineAccount();
   if (hydratedFromCache.has(workspaceId)) {
     return;
   }
@@ -189,6 +203,7 @@ const hydrateIndexFromCache = async (workspaceId: string): Promise<void> => {
     return;
   }
 
+  if (!isCurrentAccount(account)) return;
   hydratedFromCache.add(workspaceId);
 
   if (documents.length === 0) {
@@ -196,6 +211,7 @@ const hydrateIndexFromCache = async (workspaceId: string): Promise<void> => {
   }
 
   const index = await getIndex(workspaceId);
+  if (!isCurrentAccount(account)) return;
   const missingDocuments = documents.filter((doc) => !index.has(doc.id));
   if (missingDocuments.length === 0) {
     return;
@@ -215,6 +231,7 @@ const hydrateIndexFromCache = async (workspaceId: string): Promise<void> => {
 };
 
 export const searchDocumentsLocal = async (workspaceId: string, query: string): Promise<SearchResult[]> => {
+  const account = getOfflineAccount();
   const trimmed = query.trim();
   if (!trimmed) {
     return [];
@@ -222,6 +239,7 @@ export const searchDocumentsLocal = async (workspaceId: string, query: string): 
 
   await hydrateIndexFromCache(workspaceId);
   const index = await getIndex(workspaceId);
+  if (!isCurrentAccount(account)) return [];
   const results = index.search(trimmed, {
     prefix: true,
     boost: SEARCH_BOOST

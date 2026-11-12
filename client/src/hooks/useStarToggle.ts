@@ -4,6 +4,7 @@ import { toggleStarDocument, type DocumentSummary } from "../services/document.s
 import { enqueueStarToggle } from "../offline/starQueue";
 import { updateCachedDocumentStar } from "../offline/indexedDb";
 import { emitStarUpdate } from "../utils/starEvents";
+import { getOfflineAccount, isCurrentAccount } from "../offline/accountScope";
 
 type StarToggleDocument = Pick<
   DocumentSummary,
@@ -28,6 +29,7 @@ export const useStarToggle = () => {
 
   const toggleStar = useCallback(
     async (document: StarToggleDocument, callbacks?: StarToggleCallbacks) => {
+      const account = getOfflineAccount();
       const nextIsStarred = !document.isStarred;
       applyUpdate(document.id, nextIsStarred, document);
       callbacks?.onOptimisticUpdate?.(nextIsStarred);
@@ -44,6 +46,7 @@ export const useStarToggle = () => {
 
       try {
         const result = await toggleStarDocument(document.id, document.workspaceId);
+        if (!isCurrentAccount(account)) return;
         if (result.isStarred !== nextIsStarred) {
           applyUpdate(result.documentId, result.isStarred, document);
           callbacks?.onFinalUpdate?.(result.isStarred);
@@ -57,6 +60,7 @@ export const useStarToggle = () => {
         }
         return { ...result, queued: false };
       } catch (error) {
+        if (!isCurrentAccount(account)) return;
         if (!navigator.onLine) {
           await enqueueStarToggle(document.id, document.workspaceId);
           return { documentId: document.id, isStarred: nextIsStarred, queued: true };
