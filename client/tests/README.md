@@ -15,6 +15,8 @@ The runner builds the application, initializes auth/application migrations, star
 
 Locally, PostgreSQL tools (`pg_config`, `initdb`, `pg_ctl`) must be installed. Set `PG_BIN` if needed. A temporary cluster is created under the OS temporary directory with a loopback-only listener. CI instead supplies `TEST_DATABASE_ADMIN_URL` for a disposable local PostgreSQL service. The runner rejects non-local admin hosts and creates/drops only a unique `mvp_stack_<uuid>` database; it never resets the database named in the admin connection URL.
 
+CI uses Ubuntu 24.04, supported by the locked Playwright release. Keep the runner pinned until the browser dependency supports a newer Ubuntu image; `ubuntu-latest` can move ahead of that support.
+
 Pass Playwright filters after `--`, for example `npm run test:stack -- --grep "API"`. For frontend-only debugging after a successful backend build, `--reuse-server-build` skips rebuilding the unchanged backend while rebuilding the frontend with the new test URLs. Default/CI runs always build everything. Each invocation uses fresh fixtures and a fresh database. Tests create unique users/documents through real HTTP endpoints.
 
 Failure evidence is retained in `client/test-results/` (trace, screenshots, video), `client/playwright-report/`, and `test-results/stack.log`. CI uploads those directories. Browser tests block service workers until C11 repairs the production worker, so these tests currently validate IndexedDB/application offline behavior rather than service-worker offline startup.
