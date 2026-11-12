@@ -7,10 +7,11 @@ build
 !README.md
 !playwright.md
 .DS_Store
-docs/
-# Keep generated or local markdown notes under docs/ out of git.
+docs/*
+# Keep generated or local notes ignored, except the MVP planning documents.
 docs/**/*.md
-.github/
+!docs/mvp-completion-plan.md
+!docs/mvp-commit-plan.md
 .kilo/
 playwright-report/
 test-results/

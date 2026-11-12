@@ -779,7 +779,7 @@ export const Editor = () => {
       return;
     }
 
-    const handleOutsideClick = (event: MouseEvent) => {
+    const handleOutsideClick = (event: globalThis.MouseEvent) => {
       const target = event.target as Node | null;
       if (exportMenuRef.current && target && !exportMenuRef.current.contains(target)) {
         setShowExportMenu(false);

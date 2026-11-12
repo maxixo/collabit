@@ -1,5 +1,5 @@
 import { WebSocket, WebSocketServer } from "ws";
-import { ClientEvent, ServerEvent } from "../../../shared/events.js";
+import { ClientEvent, ServerEvent } from "@collab/shared/events";
 import { logger } from "../utils/logger.js";
 import { presenceManager } from "../collaboration/presenceManager.js";
 

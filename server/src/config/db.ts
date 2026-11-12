@@ -9,22 +9,21 @@ export const checkDatabaseConnection = async (): Promise<boolean> => {
   try {
     await db.query("SELECT 1");
     
-    // Check if required tables exist
+    // Auth and document tables must be initialized before accepting requests.
+    const requiredTables = ["user", "session", "account", "verification", "documents", "document_members"];
     const { rows: tables } = await db.query(`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public'
-      AND table_name IN ('documents', 'document_members')
-    `);
+      AND table_name = ANY($1::text[])
+    `, [requiredTables]);
     
     const tableNames = tables.map((row: { table_name: string }) => row.table_name);
     
-    if (!tableNames.includes("documents")) {
-      throw new Error("Required table 'documents' does not exist. Run migrations first.");
-    }
-    
-    if (!tableNames.includes("document_members")) {
-      throw new Error("Required table 'document_members' does not exist. Run migrations first.");
+    for (const table of requiredTables) {
+      if (!tableNames.includes(table)) {
+        throw new Error(`Required table '${table}' does not exist. Run migrations first.`);
+      }
     }
     
     return true;

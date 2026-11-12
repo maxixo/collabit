@@ -14,11 +14,17 @@ This repository contains a full-stack collaborative document editor built with R
   - download the local copy
   - reload the latest server version
 
+## MVP Completion Roadmap
+
+Follow the [commit-by-commit plan](docs/mvp-commit-plan.md) for the remaining MVP work, dependencies, and validation gates. The [completion overview](docs/mvp-completion-plan.md) records the product scope and release acceptance criteria.
+
+The release target is a Vercel frontend and one Node backend process on a VPS. Complete the MVP acceptance checks before deploying production.
+
 ## Local Development
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22.20.x (use `.nvmrc`; the test scripts require Node's TypeScript support)
 - PostgreSQL
 
 ### Environment
@@ -53,10 +59,19 @@ npm run dev
 - Client: `http://localhost:5173`
 - Server: `http://localhost:4000`
 
+In development, the API initializes auth and document schema automatically. Production and test startup require a successful one-shot migration first:
+
+```bash
+npm run migrations:run --workspace server
+```
+
+This command exits after migrations; it does not start the API. For compiled production commands, status, concurrency, tests, and recovery, see [database migrations](server/migrations/README.md).
+
 ### Quality Checks
 
 ```bash
 npm run lint
+npm run typecheck
 npm run test
 npm run build
 ```
