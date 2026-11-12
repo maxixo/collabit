@@ -1,8 +1,8 @@
 # MVP commit roadmap
 
-Status: implementation started. Updated 11 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
+Status: C00 through C02 complete. Updated 12 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
 
-The [completion overview](mvp-completion-plan.md) contains the full product scope and acceptance matrix. This roadmap defines reviewable implementation commits. Numbers are plan IDs, not existing Git commits. All items start unchecked; mark one complete only after its changes are committed and its checks have recorded results.
+The [completion overview](mvp-completion-plan.md) contains the full product scope and acceptance matrix. Numbers identify roadmap items; the verification record below identifies completed commits. Mark an item complete only when its changes and passing verification record are committed together.
 
 ## Execution rules
 
@@ -22,7 +22,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | --- | --- | --- | --- |
 | [x] | C00 | `docs(mvp): record commit-based completion roadmap` | Planning |
 | [x] | C01 | `fix(tooling): enforce frontend types and align Node runtimes` | Reliable checks |
-| [ ] | C02 | `fix(db): make migrations standalone and coordinated` | Reliable checks |
+| [x] | C02 | `fix(db): make migrations standalone and coordinated` | Reliable checks |
 | [ ] | C03 | `test(mvp): add isolated database and browser test stack` | Reliable checks |
 | [ ] | C04 | `fix(offline): isolate cached data and replay by account` | Data safety |
 | [ ] | C05 | `fix(offline): retain drafts until conflicts are resolved` | Data safety |
@@ -200,7 +200,8 @@ Add entries here as implementation commits land. The planning document itself do
 | Plan ID | Commit hash | Commands/scenarios checked | Outcome / remaining limitation |
 | --- | --- | --- | --- |
 | C00 | `a083302` | Documentation links, 18 commit entries, ignore exceptions, and staged whitespace/scope review. | Passed; earlier application edits excluded. |
-| C01 | This tooling commit; resolved by its unique commit message. | Fresh `npm ci --no-audit --no-fund`; lint; typecheck for all three workspaces; 13 helper tests; production builds. | Passed on Node 22.20.0. Six existing Fast Refresh warnings, stale Browserslist data, and editor bundle size warning remain. Sandbox blocked esbuild; the build passed with process execution allowed. |
+| C01 | `049d62c` | Fresh `npm ci --no-audit --no-fund`; lint; typecheck for all three workspaces; 13 helper tests; production builds. | Passed on Node 22.20.0. Six existing Fast Refresh warnings, stale Browserslist data, and editor bundle size warning remain. Sandbox blocked esbuild; the build passed with process execution allowed. |
+| C02 | This migration commit; resolve with `git log -1 --format=%h --grep="^fix(db): make migrations standalone and coordinated$"`. | `npm run ci:check`; `npm run test:migrations --workspace server` against the disposable localhost PostgreSQL cluster; documentation links and staged scope/whitespace review. | Passed on Node 22.20.0 and PostgreSQL 18.1: 13 helper tests plus 9 database regressions. Covers production startup refusing pending schema, fresh/status/repeat/concurrent runs, SQL/tracking rollback and retry, asset errors, prerequisite ordering, upgrade preservation, and CLI exit. Corrected the compiled backend/CLI layout and shared runtime imports. Existing SQL files unchanged. CI configured for disposable PostgreSQL 16; remote CI has not been run. |
 
 ## First commit staging boundary
 

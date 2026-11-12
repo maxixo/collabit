@@ -59,6 +59,14 @@ npm run dev
 - Client: `http://localhost:5173`
 - Server: `http://localhost:4000`
 
+In development, the API initializes auth and document schema automatically. Production and test startup require a successful one-shot migration first:
+
+```bash
+npm run migrations:run --workspace server
+```
+
+This command exits after migrations; it does not start the API. For compiled production commands, status, concurrency, tests, and recovery, see [database migrations](server/migrations/README.md).
+
 ### Quality Checks
 
 ```bash

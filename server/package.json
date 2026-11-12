@@ -5,15 +5,21 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "prebuild": "npm run build --workspace @collab/shared",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretypecheck": "npm run build --workspace @collab/shared",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "node --experimental-strip-types src/test/run-tests.ts",
-    "migrations:run": "tsx src/server.ts",
-    "migrations:status": "tsx scripts/run-migrations.ts status"
+    "migrations:run": "tsx scripts/run-migrations.ts run",
+    "migrations:status": "tsx scripts/run-migrations.ts status",
+    "migrations:run:prod": "node dist/migrate.js run",
+    "migrations:status:prod": "node dist/migrate.js status",
+    "test:migrations": "tsx --test tests/migrations.test.ts"
   },
   "dependencies": {
+    "@collab/shared": "*",
     "better-auth": "^1.4.13",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

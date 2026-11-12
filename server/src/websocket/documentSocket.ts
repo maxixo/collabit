@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import { ClientEvent, ServerEvent } from "@shared/events.js";
+import { ClientEvent, ServerEvent } from "@collab/shared/events";
 import type { ServerSyncResponsePayload, ServerAccessDeniedPayload } from "@shared/types.js";
 import { logger } from "../utils/logger.js";
 import { getDocumentById } from "../services/document.service.js";

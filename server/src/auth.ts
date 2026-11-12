@@ -1,12 +1,11 @@
 import { betterAuth } from "better-auth";
-import { Pool } from "pg";
+import { db } from "./config/db.js";
 import { env } from "./config/env.js";
 
 if (!env.databaseUrl) {
   throw new Error("DATABASE_URL is required for Better Auth");
 }
 
-const pool = new Pool({ connectionString: env.databaseUrl });
 const authSecret = env.authSecret || undefined;
 const googleConfig =
   env.googleClientId && env.googleClientSecret
@@ -26,7 +25,7 @@ const advancedConfig = env.isProduction
     };
 
 export const auth = betterAuth({
-  database: pool,
+  database: db,
   baseURL: env.authBaseUrl,
   secret: authSecret,
   trustedOrigins: [env.authBaseUrl, ...env.corsOrigins],

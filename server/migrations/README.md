@@ -1,198 +1,63 @@
-# Database Migrations
+# Database migrations
 
-## Overview
+Run commands below from the repository root. Development loads `server/.env`; production should inject backend variables. `DATABASE_URL` is required by the CLI. Production also requires the normal backend auth/origin/secret settings.
 
-This directory contains SQL migration files that define the database schema for the MyDocs application. Migrations are automatically managed and tracked by the application's migration system.
+## Commands
 
-## How It Works
+```sh
+# Inspect application migration status; safe on an empty database.
+npm run migrations:status --workspace server
 
-The migration system:
-1. Reads SQL files from this directory in alphabetical order
-2. Tracks applied migrations in the `schema_migrations` table
-3. Skips migrations that have already been applied
-4. Executes new migrations and marks them as applied
-5. Logs all migration operations
+# Initialize Better Auth and apply all pending application migrations, then exit.
+npm run migrations:run --workspace server
 
-## Running Migrations
+# Apply through a named migration, including all earlier prerequisites.
+npm run migrations:run --workspace server -- 004_add_soft_delete.sql
 
-### Automatic (Recommended)
-
-Migrations run automatically when the server starts:
-
-```bash
-npm run dev
+# After building, run the production CLI without tsx/development dependencies.
+npm run build --workspace server
+npm run migrations:run:prod --workspace server
+npm run migrations:status:prod --workspace server
 ```
 
-The server will:
-- Run Better Auth migrations (auth tables)
-- Run document migrations (files in this directory)
-- Verify database connection and required tables
-- Start the server if everything is successful
+`scripts/migrate.sh` forwards arguments to the source CLI from any working directory. The server's prebuild/pretypecheck hooks build shared declarations, and its explicit source root emits `dist/server.js` and `dist/migrate.js`. Keep `server/migrations/` beside `dist/` in the packaged runtime. Missing/unreadable directories and an empty SQL asset set fail instead of silently claiming success.
 
-### Manual (CLI)
+Status lists application files as pending/applied without creating tables or running Better Auth. `run` initializes Better Auth under the same session lock before applying application SQL. Successful commands close the shared auth/application pool and exit without starting HTTP or WebSockets. Failures set a nonzero exit code.
 
-Use the migration runner script for manual control:
+## Startup behavior
 
-```bash
-# Run all pending migrations
-npm run migrations:run
+`npm run dev` keeps automatic auth/application initialization when `NODE_ENV=development`. In production and test, startup rejects pending application migrations and missing auth/document tables without applying migrations. Run the one-shot migration command successfully before starting the API:
 
-# Check migration status
-npm run migrations:status
-
-# Run a specific migration
-npm run migrations:run 001_create_documents.sql
+```sh
+npm run migrations:run:prod --workspace server
+npm run start --workspace server
 ```
 
-## Migration Files
+## Ordering, concurrency, and failure recovery
 
-### Naming Convention
+- Name files with a unique, zero-padded numeric prefix, such as `009_add_revision.sql`. Files run in filename order. Duplicate numeric prefixes and unknown/path-traversal targets are rejected.
+- A PostgreSQL session advisory lock `(734021, 1)` serializes cooperating CLI/development runners across auth and application initialization. The lock is held on one dedicated connection throughout the run. Legacy runners that do not acquire this lock must not run concurrently.
+- Each application SQL file and its `schema_migrations` insert share one transaction. A failure rolls back both; earlier successful files remain applied. Fix the underlying problem and rerun: recorded files are skipped.
+- Better Auth uses its own schema initialization operations. Those operations are covered by the cross-process lock but are not part of an application file's transaction. An application failure does not roll back completed auth initialization.
+- Do not put `BEGIN`, `COMMIT`, or `ROLLBACK` inside application migration files. Do not use operations that cannot run in a transaction, such as `CREATE INDEX CONCURRENTLY`, without a separately reviewed migration design.
+- Read/review SQL changes before running them. The migration runner executes trusted repository SQL; it is not a sandbox for uploaded SQL.
 
-Migration files must follow this naming pattern:
-```
-<number>_<description>.sql
-```
+## Existing databases and rollback
 
-**Example:** `001_create_documents.sql`
+C02 changes orchestration, not the existing SQL schema files. Existing `schema_migrations(filename, applied_at)` rows and timestamps remain valid. Application migrations `000` through `008` are unchanged. The upgrade regression starts with migrations `000` through `004`, adds a document and membership, then verifies the remaining migrations preserve them and earlier tracking timestamps.
 
-The numeric prefix determines the execution order (must be unique).
+Before upgrading a real database, take and verify a backup. Stop legacy processes that automatically migrate, run the new one-shot CLI, then start the API. Application rollback does not undo schema changes: only revert to code known to be compatible with the installed schema. Prefer a reviewed forward migration for corrections. Restore a backup into a separate database if a data/schema rollback is required; do not delete tracking rows and blindly rerun SQL against valuable data.
 
-### Current Migrations
+Older runners could execute SQL and fail before recording it. If such partial state already exists, inspect it and repair it explicitly before upgrading; the new runner cannot retroactively make legacy operations atomic.
 
-#### 001_create_documents.sql
-- Creates `documents` table for storing collaborative documents
-- Creates `document_members` table for permissions and sharing
-- Adds performance indexes
-- Adds database comments for documentation
+## Regression tests
 
-## Creating New Migrations
+Build the backend first, then set `MIGRATION_TEST_DATABASE_URL` to a **local disposable PostgreSQL admin connection** and run:
 
-### Step 1: Create SQL File
-
-```bash
-# Create a new migration file
-touch server/migrations/002_add_document_tags.sql
+```sh
+npm run test:migrations --workspace server
 ```
 
-### Step 2: Write Migration SQL
+The suite creates uniquely named `mvp_migrations_*` databases, exercises the real compiled CLI and transaction behavior, and drops only those generated databases. It rejects non-local admin hosts and never resets the database named in the connection URL. Use a dedicated local test cluster/account with database-creation permission; never supply a production connection.
 
-```sql
--- Migration: Add tags to documents
--- Description: Adds tag support for better document organization
--- Created: 2026-01-18
-
--- Add tags column
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]';
-
--- Create index for tag queries
-CREATE INDEX IF NOT EXISTS idx_documents_tags ON documents USING GIN(tags);
-```
-
-### Step 3: Test Migration
-
-```bash
-# Run the specific migration
-npm run migrations:run 002_add_document_tags.sql
-
-# Check status
-npm run migrations:status
-```
-
-### Step 4: Update Application Code
-
-Update TypeScript models and services to use the new schema.
-
-## Best Practices
-
-1. **Always create new migrations** - Never modify existing migration files
-2. **Use IF NOT EXISTS** - Makes migrations idempotent and safe to re-run
-3. **Document your changes** - Add comments explaining what the migration does
-4. **Test locally first** - Run migrations on a local database before committing
-5. **Keep migrations small** - Split large changes into multiple small migrations
-6. **Use transactions** - For complex changes, wrap in BEGIN/COMMIT blocks
-7. **Add indexes** - Create indexes for columns you'll query frequently
-8. **Backup first** - Always have a database backup before running migrations
-
-## Common Patterns
-
-### Adding a Column
-
-```sql
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]';
-```
-
-### Creating an Index
-
-```sql
-CREATE INDEX IF NOT EXISTS idx_documents_tags ON documents USING GIN(tags);
-```
-
-### Adding a Foreign Key
-
-```sql
-ALTER TABLE document_members 
-ADD CONSTRAINT fk_document_members_document 
-FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE;
-```
-
-### Creating a New Table
-
-```sql
-CREATE TABLE IF NOT EXISTS document_comments (
-  id TEXT PRIMARY KEY,
-  document_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_document_comments_document 
-ON document_comments(document_id);
-```
-
-## Troubleshooting
-
-### Migration Already Applied
-
-If you see "Migration already applied", the migration has been run before. This is normal and expected behavior.
-
-### Migration Failed
-
-If a migration fails:
-1. Check the error message in the logs
-2. Verify the SQL syntax is correct
-3. Ensure the database user has required permissions
-4. Check that previous migrations have been applied
-5. Fix the issue and restart the server
-
-### Database Out of Sync
-
-If your database is out of sync with migrations:
-1. Check which migrations have been applied: `npm run migrations:status`
-2. Compare with the files in this directory
-3. Run missing migrations: `npm run migrations:run`
-4. If needed, reset the database (CAUTION: This deletes all data)
-
-## Rollbacks
-
-Currently, the migration system does not support automatic rollbacks. To rollback a migration:
-
-1. Manually write SQL to reverse the migration
-2. Execute it in the database
-3. Remove the migration record from `schema_migrations` table:
-   ```sql
-   DELETE FROM schema_migrations WHERE filename = '001_create_documents.sql';
-   ```
-
-**Warning:** Rollbacks should only be done in development. In production, create a new migration to fix issues instead.
-
-## Related Documentation
-
-- [Database Documentation](../../../database.md) - Complete database schema and usage guide
-- [Migration System](../src/config/migrations.ts) - Migration runner implementation
-- [Database Configuration](../src/config/db.ts) - Database connection setup
-
----
-
-**Last Updated:** 2026-01-18
+Coverage includes empty status, auth/application setup, repeat runs, concurrent processes, transaction and tracking failure recovery, missing assets, selected-target prerequisites, upgrade preservation, and CLI process exit. CI provides disposable PostgreSQL 16; local C02 verification also exercises PostgreSQL 18.
