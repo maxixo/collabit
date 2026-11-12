@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { updateProfile, validateProfileUpdate } from "../services/user.service";
 import { WorkspaceProvider, useWorkspace } from "../workspace/WorkspaceContext";
 import { exportLegacyDrafts } from "../offline/indexedDb";
+import { LocalDraftRecovery } from "../components/LocalDraftRecovery";
 
 const ProfileContent = ({ workspaceId }: { workspaceId: string }) => {
   const { user, status, refresh } = useAuth();
@@ -168,6 +169,7 @@ const ProfileContent = ({ workspaceId }: { workspaceId: string }) => {
         </section>
 
         <aside className="grid gap-4">
+          <LocalDraftRecovery />
           <div className="rounded-2xl border border-[#e7e7f3] bg-white p-6 shadow-sm dark:border-[#2a2b4a] dark:bg-[#16172d]">
             <p className="text-xs font-semibold uppercase tracking-widest text-[#4c4d9a] dark:text-[#a1a1c9]">
               Active workspace

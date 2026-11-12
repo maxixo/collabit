@@ -63,7 +63,7 @@ export const ConflictModal = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="mx-4 w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#16172d]">
+      <div role="dialog" aria-modal="true" aria-label="Resolve document conflict" className="mx-4 w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#16172d]">
         <div className="flex items-center justify-between border-b border-[#e7e7f3] bg-[#f8f8fc] px-6 py-4 dark:border-[#2a2b4a] dark:bg-[#1e1f3a]">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-600">

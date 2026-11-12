@@ -1,9 +1,9 @@
-import { accountFetch, responseAccount } from "../offline/accountScope";
+import { accountFetch, responseAccount, type OfflineAccount } from "../offline/accountScope";
 import {
   getDocument as getCachedDocument,
   listDocumentsByWorkspace,
-  saveDocument,
-  saveDocuments
+  saveServerDocument as saveDocument,
+  saveServerDocuments as saveDocuments
 } from "../offline/indexedDb";
 
 export type TipTapContent = Record<string, unknown>;
@@ -24,6 +24,10 @@ export interface DocumentDetail extends DocumentSummary {
 
 export type DocumentAccessRole = "viewer" | "editor" | "owner";
 
+export class DocumentRequestError extends Error {
+  constructor(message: string, public readonly status: number) { super(message); }
+}
+
 const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? "http://localhost:4000";
 
 const parseJson = async <T>(response: Response): Promise<T> => {
@@ -33,7 +37,7 @@ const parseJson = async <T>(response: Response): Promise<T> => {
   if (!response.ok) {
     const message =
       (data as { message?: string }).message ?? "Document request failed";
-    throw new Error(message);
+    throw new DocumentRequestError(message, response.status);
   }
   return data;
 };
@@ -186,12 +190,12 @@ export const emptyTrash = async (
 export const fetchDocumentById = async (
   id: string,
   workspaceId?: string,
-  options?: { signal?: AbortSignal; shareToken?: string }
+  options?: { signal?: AbortSignal; shareToken?: string; cache?: boolean; account?: OfflineAccount }
 ): Promise<DocumentDetail | null> => {
   try {
     const response = await accountFetch(
       buildDocumentUrl(id, workspaceId, options?.shareToken),
-      { credentials: "include", signal: options?.signal }
+      { credentials: "include", signal: options?.signal }, options?.account
     );
 
     if (response.status === 404) {
@@ -208,14 +212,14 @@ export const fetchDocumentById = async (
           accessRole: data.accessRole
         }
       : null;
-    if (document) {
+    if (document && options?.cache !== false) {
       await safeStore(() => saveDocument(document, responseAccount(response)));
     }
     responseAccount(response);
     return document;
   } catch (error) {
-    if (!navigator.onLine) {
-      return getCachedDocument(id);
+    if (!navigator.onLine && options?.cache !== false) {
+      return getCachedDocument(id, options?.account);
     }
     throw error;
   }
@@ -264,7 +268,7 @@ export const updateDocument = async (payload: {
   workspaceId: string;
   title?: string;
   content?: TipTapContent;
-}, options?: { signal?: AbortSignal; shareToken?: string }): Promise<DocumentDetail> => {
+}, options?: { signal?: AbortSignal; shareToken?: string; account?: OfflineAccount }): Promise<DocumentDetail> => {
   const response = await accountFetch(
     buildDocumentUrl(payload.id, payload.workspaceId, options?.shareToken),
     {
@@ -276,7 +280,7 @@ export const updateDocument = async (payload: {
         title: payload.title,
         content: payload.content
       })
-    }
+    }, options?.account
   );
 
   const data = await parseJson<{ document: DocumentDetail }>(response);

@@ -2,6 +2,8 @@
 
 `npm test` also runs IndexedDB ownership/search and late-response regressions using `fake-indexeddb`. The browser account-isolation case exercises real IndexedDB, cookies, API requests, and A -> B -> A queued replay. Legacy `collab-editor` data is never assigned to a new login; Profile offers a deliberate unassigned export instead.
 
+The recovery suite checks durable local/server conflicts after reload, download preservation, rejected and acknowledged duplicate requests, explicit reload-server resolution, 401/403 retry from Profile, and navigation before the autosave debounce. Queue regressions cover transient outages and edits made during an in-flight save. To recover work manually, open Profile > Local drafts. Downloading keeps the draft; Retry sync checks the current server version again; Discard draft removes that local snapshot after confirmation.
+
 Run `npm ci` from the repository root, then install the locked browser revision:
 
 ```sh

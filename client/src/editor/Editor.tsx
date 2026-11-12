@@ -225,6 +225,7 @@ export const EditorSurface = ({
   );
   const onChangeRef = useRef(onChange);
   const lastHydratedKey = useRef<string | null>(null);
+  const hydratedEditor = useRef<TipTapEditor | null>(null);
 
   const debouncedCursorUpdate = useMemo(
     () =>
@@ -435,6 +436,8 @@ export const EditorSurface = ({
       content: EMPTY_TIPTAP_DOC,
       editable,
       onUpdate: ({ editor: editorInstance, transaction }) => {
+        // Editor creation/reconfiguration must never enqueue an empty initialization snapshot.
+        if (hydratedEditor.current !== editorInstance || loading || error || !transaction.docChanged) return;
         const nextContent = editorInstance.getJSON() as JSONContent;
         onChangeRef.current(nextContent);
         updateStats(editorInstance);
@@ -582,6 +585,7 @@ export const EditorSurface = ({
     safeEditor.commands.setContent(safeContent, false);
     clearAllSuggestionMarks(safeEditor);
 
+    hydratedEditor.current = safeEditor;
     safeEditor.commands.focus("end");
     lastHydratedKey.current = hydrationKey;
     updateStats(safeEditor);
@@ -596,7 +600,7 @@ export const EditorSurface = ({
 
   useEffect(() => {
     if (safeEditor) {
-      safeEditor.setEditable(editable);
+      safeEditor.setEditable(editable, false);
     }
   }, [safeEditor, editable]);
 

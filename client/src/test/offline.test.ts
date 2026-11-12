@@ -2,7 +2,9 @@ import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { setOfflineAccount, getOfflineAccount, accountFetch, isCurrentAccount } from "../offline/accountScope";
-import { saveDocument, getDocument, listDocumentsByWorkspace, saveOperation, listOperations, exportLegacyDrafts, setMeta, getMeta } from "../offline/indexedDb";
+import { saveDocument, saveServerDocument, getDocument, listDocumentsByWorkspace, saveOperation, listOperations, exportLegacyDrafts, setMeta, getMeta } from "../offline/indexedDb";
+import { enqueueDocumentUpdate, flushDocumentQueue, getQueuedDocumentUpdate, retryQueuedDocument, discardQueuedDocument } from "../offline/documentQueue";
+import type { DocumentDetail } from "../services/document.service";
 import { flushStarQueue } from "../offline/starQueue";
 import { indexDocument, searchDocumentsLocal } from "../offline/searchIndex";
 
@@ -87,3 +89,118 @@ test('legacy unscoped drafts are preserved only as an explicit unassigned export
   assert.equal(exported?.operations.length, 1);
   assert.deepEqual(await listOperations(), []);
 });
+
+const body = (text: string) => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+const draftInput = (text = "local work") => ({
+  documentId: document.id, workspaceId: "default", title: "Local title", content: body(text),
+  updatedAtClient: "2026-01-02", baseUpdatedAt: document.updatedAt
+});
+const withQueue = async (id: string, run: (server: { document: DocumentDetail; respond?: typeof fetch; patches: number }) => Promise<void>) => {
+  setOfflineAccount(id);
+  const originalFetch = globalThis.fetch;
+  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const onlineDescriptor = Object.getOwnPropertyDescriptor(navigator, "onLine");
+  Object.defineProperty(globalThis, "window", { configurable: true, value: new EventTarget() });
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+  const server: { document: DocumentDetail; respond?: typeof fetch; patches: number } = { document: { ...document, content: body("original") }, patches: 0 };
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("/api/auth/me")) return Response.json({ user: { id } });
+    if (server.respond) return server.respond(input, init);
+    if (init?.method === "PATCH") {
+      server.patches++;
+      server.document = { ...server.document, ...JSON.parse(String(init.body)), updatedAt: "2026-01-03" };
+      return Response.json({ document: server.document });
+    }
+    return Response.json({ document: server.document, accessRole: "owner" });
+  };
+  try { await run(server); }
+  finally {
+    globalThis.fetch = originalFetch;
+    if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (onlineDescriptor) Object.defineProperty(navigator, "onLine", onlineDescriptor);
+    else Reflect.deleteProperty(navigator, "onLine");
+  }
+};
+
+test("conflicts retain local and server copies across account reloads and reads", async () => withQueue("conflict-owner", async (server) => {
+  await saveDocument({ ...document, title: "Local title", content: body("local work") });
+  await enqueueDocumentUpdate(draftInput());
+  server.document = { ...server.document, title: "Remote title", content: body("remote work"), updatedAt: "2026-01-02" };
+  await flushDocumentQueue();
+  await saveServerDocument(server.document);
+  assert.equal((await getDocument(document.id))?.title, "Local title");
+  const conflict = await getQueuedDocumentUpdate(document.id);
+  assert.equal(conflict?.payload.sync?.status, "conflict");
+  assert.deepEqual(conflict?.payload.sync?.server?.content, body("remote work"));
+  setOfflineAccount(null);
+  setOfflineAccount("conflict-owner");
+  assert.deepEqual((await getQueuedDocumentUpdate(document.id))?.payload.content, body("local work"));
+  await flushDocumentQueue();
+  assert.equal(server.patches, 0);
+  const edited = await enqueueDocumentUpdate({ ...draftInput("more local work"), baseUpdatedAt: "2026-01-02" });
+  assert.equal(edited.payload.baseUpdatedAt, document.updatedAt);
+  assert.equal(edited.payload.sync?.status, "conflict");
+  await assert.rejects(discardQueuedDocument(document.id, conflict!.id), /draft changed/);
+  assert.ok(await getQueuedDocumentUpdate(document.id));
+  await discardQueuedDocument(document.id, edited.id);
+  assert.equal(await getQueuedDocumentUpdate(document.id), null);
+  assert.equal(await getDocument(document.id), null);
+}));
+
+for (const status of [401, 403]) {
+  test(`HTTP ${status} retains a blocked draft until explicit retry succeeds`, async () => withQueue("rejected-" + status, async (server) => {
+    await enqueueDocumentUpdate(draftInput());
+    let requests = 0;
+    server.respond = async () => { requests++; return Response.json({ message: "Access denied" }, { status }); };
+    await flushDocumentQueue();
+    const rejected = await getQueuedDocumentUpdate(document.id);
+    assert.equal(rejected?.payload.sync?.status, "blocked");
+    assert.deepEqual(rejected?.payload.content, body("local work"));
+    await flushDocumentQueue();
+    assert.equal(requests, 1);
+    server.respond = undefined;
+    await retryQueuedDocument(document.id);
+    assert.equal(await getQueuedDocumentUpdate(document.id), null);
+    assert.deepEqual(server.document.content, body("local work"));
+  }));
+}
+
+test("a transient outage retains the draft and a later replay acknowledges it", async () => withQueue("outage-owner", async (server) => {
+  await enqueueDocumentUpdate(draftInput());
+  server.respond = async () => { throw new TypeError("Network unavailable"); };
+  await flushDocumentQueue();
+  assert.equal((await getQueuedDocumentUpdate(document.id))?.payload.sync?.status, "pending");
+  server.respond = undefined;
+  await flushDocumentQueue();
+  assert.equal(await getQueuedDocumentUpdate(document.id), null);
+  assert.deepEqual((await getDocument(document.id))?.content, body("local work"));
+}));
+
+test("acknowledging an older save preserves edits queued during the request", async () => withQueue("generation-owner", async (server) => {
+  const first = await enqueueDocumentUpdate(draftInput("first edit"));
+  let release!: () => void;
+  let started!: () => void;
+  const reachedPatch = new Promise<void>((resolve) => { started = resolve; });
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  server.respond = async (_input, init) => {
+    if (init?.method === "PATCH") {
+      started(); await released;
+      server.document = { ...server.document, content: body("first edit"), updatedAt: "2026-01-03" };
+    }
+    return Response.json({ document: server.document, accessRole: "owner" });
+  };
+  const saving = flushDocumentQueue();
+  await reachedPatch;
+  const newer = await enqueueDocumentUpdate(draftInput("newer edit"));
+  assert.notEqual(first.id, newer.id);
+  release(); await saving;
+  const retained = await getQueuedDocumentUpdate(document.id);
+  assert.equal(retained?.id, newer.id);
+  assert.deepEqual(retained?.payload.content, body("newer edit"));
+  assert.equal(retained?.payload.baseUpdatedAt, "2026-01-03");
+  server.respond = undefined;
+  await flushDocumentQueue();
+  assert.equal(await getQueuedDocumentUpdate(document.id), null);
+  assert.deepEqual(server.document.content, body("newer edit"));
+}));

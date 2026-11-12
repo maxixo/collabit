@@ -1,6 +1,6 @@
 # MVP commit roadmap
 
-Status: C00 through C04 complete. Updated 12 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
+Status: C00 through C05 complete. Updated 12 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
 
 The [completion overview](mvp-completion-plan.md) contains the full product scope and acceptance matrix. Numbers identify roadmap items; the verification record below identifies completed commits. Mark an item complete only when its changes and passing verification record are committed together.
 
@@ -25,7 +25,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | [x] | C02 | `fix(db): make migrations standalone and coordinated` | Reliable checks |
 | [x] | C03 | `test(mvp): add isolated database and browser test stack` | Reliable checks |
 | [x] | C04 | `fix(offline): isolate cached data and replay by account` | Data safety |
-| [ ] | C05 | `fix(offline): retain drafts until conflicts are resolved` | Data safety |
+| [x] | C05 | `fix(offline): retain drafts until conflicts are resolved` | Data safety |
 | [ ] | C06 | `fix(documents): reject stale writes and make replay retry-safe` | Data safety |
 | [ ] | C07 | `fix(collaboration): persist rooms and synchronize document state` | Collaboration |
 | [ ] | C08 | `fix(server): drain sockets and flush pending state on shutdown` | Collaboration |
@@ -205,8 +205,12 @@ Add entries here as implementation commits land. The planning document itself do
 
 ## First commit staging boundary
 
-C04 verification: account-scoped IndexedDB, search/metadata and queues; abortable identity-bound requests with a matching server session guard; authenticated replay only; per-account application state and socket cleanup; legacy cache preserved as an explicit unassigned export. A clean lockfile install preserved existing dependency versions. Passed workspace typechecks/lint, 13 existing helper tests, 5 ownership/search/storage regressions, full application builds, and 8 browser/API scenarios including A -> B -> A offline draft replay. Commit C03 is `63d103f`; this account-isolation commit is resolved by its unique message. C11 still owns service-worker installation/offline startup; private API caching is disabled here.
+C05 verification: this commit, resolved with `git log -1 --format=%h --grep="^fix(offline): retain drafts until conflicts are resolved$"`. Every edit enters durable storage before the network debounce. Pending/conflict/rejected operations survive reload and account changes; server reads preserve pending local content; only acknowledged generations or explicitly discarded snapshots are removed. Conflicts retain separate server/local bodies. Profile lists retained drafts with download, retry, and confirmed discard. Duplicate resolves only after a successful server copy; download/close preserve the draft. Explicit discard atomically removes the operation and cached local body. Editor initialization and editability events cannot enqueue empty or unchanged snapshots.
 
-C03 verification: this test-stack commit passed 7 production-frontend API/browser scenarios (5 editor, 2 API), 13 helper tests, workspace lint/typechecks, backend builds, and a fresh frontend build. The isolated runner creates its own database/ports, retains failure evidence, and tears down its resources. Tests exposed and fixed early/recreated-editor hydration and corrected missing/stale baseline selectors. Existing unrelated edits remain in the original worktree. C03-C05 use the isolated `mvp/c03-c05` worktree based on merged main.
+C05 checks passed: workspace lint/typechecks; 13 existing helper tests plus 10 IndexedDB/account/queue regressions; production application builds; all 13 production-frontend API/browser cases against a disposable PostgreSQL database. Added cases cover conflict reload, download, failed/successful duplicate, reload-server resolution, 401/403 reload/retry, navigation before debounce, transient outages, and a newer edit surviving an older acknowledgement. Existing six Fast Refresh warnings, Browserslist data warning, and editor chunk-size warning remain. Backend build was reused only for frontend-only verification reruns. C06 still owns atomic server concurrency/retry guarantees; C11 owns service-worker installation and offline session startup. Stored sync metadata is additive within the existing account database; export unresolved drafts before downgrading to an older client that ignores recovery states.
+
+C04 verification (`6f4215f`): account-scoped IndexedDB, search/metadata and queues; abortable identity-bound requests with a matching server session guard; authenticated replay only; per-account application state and socket cleanup; legacy cache preserved as an explicit unassigned export. A clean lockfile install preserved existing dependency versions. Passed workspace typechecks/lint, 13 existing helper tests, 5 ownership/search/storage regressions, full application builds, and 8 browser/API scenarios including A -> B -> A offline draft replay. C11 still owns service-worker installation/offline startup; private API caching is disabled here.
+
+C03 verification (`63d103f`): the test-stack commit passed 7 production-frontend API/browser scenarios (5 editor, 2 API), 13 helper tests, workspace lint/typechecks, backend builds, and a fresh frontend build. The isolated runner creates its own database/ports, retains failure evidence, and tears down its resources. Tests exposed and fixed early/recreated-editor hydration and corrected missing/stale baseline selectors. Existing unrelated edits remain in the original worktree. C03-C05 use the isolated `mvp/c03-c05` worktree based on merged main.
 
 C00 includes only the two planning documents, the README link, and the scoped `.gitignore` changes introduced for them. The repository already contains other uncommitted `.gitignore` and application edits. Stage the intended hunks explicitly and inspect `git diff --cached` before committing. The plan does not authorize bundling those earlier edits or starting production deployment.

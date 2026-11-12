@@ -57,6 +57,87 @@ export const saveDocument = async (document: StoredDocument, account = getOfflin
 export const saveDocuments = async (documents: StoredDocument[], account = getOfflineAccount()) => {
   await Promise.all(documents.map((document) => saveDocument(document, account)));
 };
+
+export const replaceDocumentOperation = async (operation: OfflineOperation, account = getOfflineAccount()): Promise<OfflineOperation> => {
+  const db = await openEditorDb(account);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("operations", "readwrite");
+    const store = tx.objectStore("operations");
+    const request = store.getAll();
+    let result = operation;
+    request.onsuccess = () => {
+      const existing: OfflineOperation[] = request.result.filter((item: OfflineOperation) =>
+        item.documentId === operation.documentId && item.workspaceId === operation.workspaceId &&
+        (item.payload as { type?: string })?.type === "document_update"
+      );
+      existing.sort((a, b) => b.createdAt - a.createdAt);
+      const previous = existing[0]?.payload as Record<string, unknown> | undefined;
+      result = { ...operation, payload: {
+        ...(operation.payload as object),
+        ...(previous ? { baseUpdatedAt: previous.baseUpdatedAt, sync: previous.sync } : {})
+      } };
+      for (const item of existing) store.delete(item.id);
+      store.put(result);
+    };
+    tx.oncomplete = () => resolve(result);
+    tx.onabort = tx.onerror = () => reject(tx.error ?? request.error);
+  });
+};
+
+export const updateOperationIfPresent = async (operation: OfflineOperation, account = getOfflineAccount()): Promise<boolean> => {
+  const db = await openEditorDb(account);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("operations", "readwrite");
+    const store = tx.objectStore("operations");
+    const request = store.get(operation.id);
+    let updated = false;
+    request.onsuccess = () => {
+      if (request.result) { store.put(operation); updated = true; }
+    };
+    tx.oncomplete = () => resolve(updated);
+    tx.onabort = tx.onerror = () => reject(tx.error ?? request.error);
+  });
+};
+
+export const discardDocumentOperation = async (id: string, account = getOfflineAccount()): Promise<boolean> => {
+  const db = await openEditorDb(account);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(["operations", "documents"], "readwrite");
+    const store = tx.objectStore("operations");
+    const request = store.get(id);
+    let removed = false;
+    request.onsuccess = () => {
+      const operation = request.result as OfflineOperation | undefined;
+      if (!operation || (operation.payload as { type?: string })?.type !== "document_update") return;
+      store.delete(id);
+      // The cached body is also a local copy; fetch the server again after explicit discard.
+      tx.objectStore("documents").delete(operation.documentId);
+      removed = true;
+    };
+    tx.oncomplete = () => resolve(removed);
+    tx.onabort = tx.onerror = () => reject(tx.error ?? request.error);
+  });
+};
+
+export const saveServerDocument = async (document: StoredDocument, account = getOfflineAccount()): Promise<void> => {
+  const db = await openEditorDb(account);
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(["documents", "operations"], "readwrite");
+    const pending = tx.objectStore("operations").getAll();
+    pending.onsuccess = () => {
+      if (pending.result.some((operation: OfflineOperation) => operation.documentId === document.id &&
+        (operation.payload as { type?: string })?.type === "document_update")) return;
+      const store = tx.objectStore("documents");
+      const current = store.get(document.id);
+      current.onsuccess = () => store.put({ ...current.result, ...document });
+    };
+    tx.oncomplete = () => resolve();
+    tx.onabort = tx.onerror = () => reject(tx.error ?? pending.error);
+  });
+};
+export const saveServerDocuments = async (documents: StoredDocument[], account = getOfflineAccount()) => {
+  await Promise.all(documents.map((document) => saveServerDocument(document, account)));
+};
 export const getDocumentRecord = async (id: string, account = getOfflineAccount()): Promise<StoredDocument | null> =>
   (await transaction("documents", "readonly", (store) => store.get(id), account)) ?? null;
 export const getDocument = async (id: string, account = getOfflineAccount()): Promise<DocumentState | null> => {
