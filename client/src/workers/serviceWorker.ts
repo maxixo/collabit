@@ -1,7 +1,6 @@
 const SW_VERSION = "v1";
 const SHELL_CACHE = `editor-shell-${SW_VERSION}`;
 const ASSET_CACHE = `editor-assets-${SW_VERSION}`;
-const API_CACHE = `editor-api-${SW_VERSION}`;
 
 const SHELL_URLS = ["/", "/index.html"];
 
@@ -88,7 +87,7 @@ if (isServiceWorkerScope()) {
       caches.keys().then((keys) =>
         Promise.all(
           keys.map((key) => {
-            if (![SHELL_CACHE, ASSET_CACHE, API_CACHE].includes(key)) {
+            if (![SHELL_CACHE, ASSET_CACHE].includes(key)) {
               return caches.delete(key);
             }
             return Promise.resolve(false);
@@ -109,7 +108,6 @@ if (isServiceWorkerScope()) {
     const isDocumentApi = url.pathname.startsWith("/api/documents");
 
     if (isDocumentApi) {
-      event.respondWith(networkFirst(request, API_CACHE));
       return;
     }
 

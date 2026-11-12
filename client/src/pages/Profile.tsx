@@ -3,6 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { updateProfile, validateProfileUpdate } from "../services/user.service";
 import { WorkspaceProvider, useWorkspace } from "../workspace/WorkspaceContext";
+import { exportLegacyDrafts } from "../offline/indexedDb";
+import { LocalDraftRecovery } from "../components/LocalDraftRecovery";
 
 const ProfileContent = ({ workspaceId }: { workspaceId: string }) => {
   const { user, status, refresh } = useAuth();
@@ -155,9 +157,19 @@ const ProfileContent = ({ workspaceId }: { workspaceId: string }) => {
               </button>
             </div>
           </form>
+          <button type="button" className="mt-4 text-sm underline" onClick={() => {
+            void exportLegacyDrafts().then((drafts) => {
+              if (!drafts) { setSuccessMessage("No earlier local drafts were found."); return; }
+              const url = URL.createObjectURL(new Blob([JSON.stringify(drafts, null, 2)], { type: "application/json" }));
+              const link = document.createElement("a"); link.href = url; link.download = "unassigned-local-drafts.json"; link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+              setSuccessMessage("Earlier drafts downloaded. Review ownership before reusing them.");
+            }).catch(() => setFormError("Unable to export earlier local drafts."));
+          }}>Download drafts from an earlier version</button>
         </section>
 
         <aside className="grid gap-4">
+          <LocalDraftRecovery />
           <div className="rounded-2xl border border-[#e7e7f3] bg-white p-6 shadow-sm dark:border-[#2a2b4a] dark:bg-[#16172d]">
             <p className="text-xs font-semibold uppercase tracking-widest text-[#4c4d9a] dark:text-[#a1a1c9]">
               Active workspace

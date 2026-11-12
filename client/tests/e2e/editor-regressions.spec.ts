@@ -14,6 +14,36 @@ import {
 } from "./helpers/editor";
 
 test.describe("editor regressions", () => {
+  test("saved edits survive a full page reload", async ({ browser }) => {
+    const owner = await createAuthenticatedPage(browser, "autosave-reload");
+    try {
+      const document = await createDocumentViaApi(owner.context.request, {
+        title: "Reload fixture", content: createParagraphDocument("Saved body")
+      });
+      await openDocument(owner.page, document.id);
+      await expect(getEditorRoot(owner.page)).toContainText("Saved body");
+      await getEditorRoot(owner.page).press('End');
+      await typeInEditor(owner.page, " with changes");
+      await expect(owner.page.getByTitle('Autosave status')).toContainText('Autosave: Saved');
+      await owner.page.reload();
+      await waitForEditorReady(owner.page);
+      await expect(getEditorRoot(owner.page)).toContainText('Saved body with changes');
+    } finally { await owner.context.close(); }
+  });
+
+  test("opening another document hydrates its own saved content", async ({ browser }) => {
+    const owner = await createAuthenticatedPage(browser, "document-hydration");
+    try {
+      const first = await createDocumentViaApi(owner.context.request, { title: "First", content: createParagraphDocument("first body") });
+      const second = await createDocumentViaApi(owner.context.request, { title: "Second", content: createParagraphDocument("second body") });
+      await openDocument(owner.page, first.id);
+      await expect(getEditorRoot(owner.page)).toContainText('first body');
+      await openDocument(owner.page, second.id);
+      await expect(getEditorRoot(owner.page)).toContainText('second body');
+      await expect(getEditorRoot(owner.page)).not.toContainText('first body');
+    } finally { await owner.context.close(); }
+  });
+
   test("creating a new document resets old editor content", async ({ browser }) => {
     const owner = await createAuthenticatedPage(browser, "owner-reset");
 
@@ -30,7 +60,7 @@ test.describe("editor regressions", () => {
       await owner.page.waitForURL(/\/editor\/[^?]+\?workspaceId=/);
       await waitForEditorReady(owner.page);
 
-      await expect(owner.page.getByTestId("editor-title-input")).toHaveValue("");
+      await expect(owner.page.getByTestId("editor-title-input")).toHaveValue("Untitled document");
       await expect(getEditorRoot(owner.page)).not.toContainText("legacy content that must clear");
       await assertNoUnexpectedSuggestionArtifacts(owner.page);
 

@@ -1,4 +1,5 @@
 import { createOfflineQueue, type OfflineQueueItem } from "./offlineQueue";
+import { getOfflineAccount, isCurrentAccount, verifyOfflineSession } from "./accountScope";
 
 const STAR_QUEUE_TYPE = "star_toggle";
 
@@ -24,8 +25,10 @@ export const enqueueStarToggle = async (documentId: string, workspaceId: string)
 export const flushStarQueue = async (
   handler: (entry: { documentId: string; workspaceId: string }) => Promise<void>
 ) => {
-  const items = await queue.list();
+  const account = getOfflineAccount();
+  const items = await queue.list(account);
   const starItems = items.filter(isStarQueueItem);
+  if (!starItems.length || !await verifyOfflineSession(account)) return;
   const grouped = new Map<string, { documentId: string; workspaceId: string; ids: string[] }>();
 
   for (const item of starItems) {
@@ -40,11 +43,13 @@ export const flushStarQueue = async (
   }
 
   for (const entry of grouped.values()) {
+    if (!isCurrentAccount(account)) return;
     if (entry.ids.length % 2 === 1) {
       await handler({ documentId: entry.documentId, workspaceId: entry.workspaceId });
     }
     for (const id of entry.ids) {
-      await queue.remove(id);
+      if (!isCurrentAccount(account)) return;
+      await queue.remove(id, account);
     }
   }
 };

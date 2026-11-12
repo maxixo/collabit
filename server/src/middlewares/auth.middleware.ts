@@ -81,6 +81,11 @@ export const authMiddleware = async (
     }
 
     const user = await getSessionUser(req);
+    const expectedUser = req.header("x-expected-user-id");
+    if (expectedUser && expectedUser !== user?.id) {
+      res.status(401).json({ message: "Session account changed. Sign in again before syncing." });
+      return;
+    }
     if (!user) {
       if (shareToken) {
         next();

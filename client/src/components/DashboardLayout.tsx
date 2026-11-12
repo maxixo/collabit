@@ -74,6 +74,7 @@ const DashboardLayoutInner = ({
             </div>
 
             <button
+                data-testid="create-document-button"
               className="hover-lift flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 text-sm font-bold tracking-wide text-white disabled:cursor-not-allowed disabled:opacity-60"
               type="button"
               onClick={onCreateDocument}

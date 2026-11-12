@@ -87,7 +87,10 @@ export const Editor = () => {
     loading,
     error,
     saveStatus,
+    saveError,
     conflictState,
+    discardLocalDraft,
+    hydrationVersion,
     reloadDocument
   } = useDocument(id, workspaceId, { shareToken: shareToken ?? undefined });
   const activeDocument = id ? (document?.id === id ? document : null) : document;
@@ -548,13 +551,14 @@ export const Editor = () => {
     }
 
     try {
-      const duplicateTitle = `${currentDocument.title?.trim() || "Untitled document"} (local copy)`;
+      const duplicateTitle = `${(conflictState?.local.title ?? currentDocument.title)?.trim() || "Untitled document"} (local copy)`;
       const duplicated = await createDocument({
         title: duplicateTitle,
-        content: currentDocument.content,
+        content: conflictState?.local.content ?? currentDocument.content,
         workspaceId
       });
 
+      await discardLocalDraft();
       setShowConflictModal(false);
       navigate(
         `/editor/${encodeURIComponent(duplicated.id)}?workspaceId=${encodeURIComponent(workspaceId)}`,
@@ -563,7 +567,7 @@ export const Editor = () => {
     } catch (error) {
       setExportError(error instanceof Error ? error.message : "Failed to duplicate local copy.");
     }
-  }, [navigate, workspaceId]);
+  }, [navigate, workspaceId, conflictState, discardLocalDraft]);
 
   const handleDownloadLocal = useCallback(() => {
     const currentDocument = documentRef.current;
@@ -572,16 +576,21 @@ export const Editor = () => {
     }
 
     exportDocumentAsDoc({
-      title: `${currentDocument.title?.trim() || "Untitled document"} (local copy)`,
-      content: currentDocument.content as JSONContent,
+      title: `${(conflictState?.local.title ?? currentDocument.title)?.trim() || "Untitled document"} (local copy)`,
+      content: (conflictState?.local.content ?? currentDocument.content) as JSONContent,
       updatedAt: currentDocument.updatedAt
     });
-  }, []);
+  }, [conflictState]);
 
-  const handleUseServer = useCallback(() => {
-    setShowConflictModal(false);
-    reloadDocument();
-  }, [reloadDocument]);
+  const handleUseServer = useCallback(async () => {
+    try {
+      await discardLocalDraft();
+      setShowConflictModal(false);
+      reloadDocument();
+    } catch (failure) {
+      setExportError(failure instanceof Error ? failure.message : "Unable to resolve this draft.");
+    }
+  }, [reloadDocument, discardLocalDraft]);
 
   const handleConflictClose = useCallback(() => {
     setShowConflictModal(false);
@@ -737,7 +746,7 @@ export const Editor = () => {
 
   const editorContent = (activeDocument?.content as JSONContent) ?? emptyContent;
   const effectiveError = shareValidationError ?? error;
-  const effectiveLoading = loading || isValidatingShare;
+  const effectiveLoading = loading || isValidatingShare || Boolean(documentId && !activeDocument && !effectiveError);
   const isEditable = Boolean(activeDocument) && !effectiveLoading && !effectiveError && Boolean(workspaceId) && !isShareViewer;
   const searchActive = searchQuery.trim().length > 0;
 
@@ -1171,6 +1180,12 @@ export const Editor = () => {
               </p>
             </div>
           )}
+          {saveError && (
+            <p role="status" className="px-6 py-2 text-sm text-amber-700 dark:text-amber-200">
+              {saveError}{" "}
+              <Link className="underline" to={`/profile?workspaceId=${encodeURIComponent(workspaceId)}`}>Recover local drafts</Link>
+            </p>
+          )}
           {exportError && (
             <div className="mx-auto mt-4 max-w-2xl rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/50 dark:bg-red-950/30">
               <p className="text-sm font-medium text-red-800 dark:text-red-300">
@@ -1184,7 +1199,7 @@ export const Editor = () => {
               key={documentId || "no-doc"}
               documentId={documentId}
               content={editorContent}
-              contentVersion={contentResetVersion}
+              contentVersion={contentResetVersion + hydrationVersion}
               editable={isEditable}
               onChange={handleContentChange}
               onTitleChange={handleTitleChange}
@@ -1237,7 +1252,7 @@ export const Editor = () => {
         serverVersion={serverVersion}
         documentTitle={displayTitle}
         onKeepLocalCopy={() => void handleKeepLocalCopy()}
-        onUseServer={handleUseServer}
+        onUseServer={() => void handleUseServer()}
         onDownloadLocal={handleDownloadLocal}
         onClose={handleConflictClose}
       />

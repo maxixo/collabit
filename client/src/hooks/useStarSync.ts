@@ -5,8 +5,10 @@ import { updateCachedDocumentStar } from "../offline/indexedDb";
 import { syncOnReconnect } from "../offline/syncOnReconnect";
 import { toggleStarDocument } from "../services/document.service";
 import { emitStarUpdate, subscribeToStarUpdates } from "../utils/starEvents";
+import { useAuth } from "../auth/AuthContext";
 
 export const useStarSync = () => {
+  const { user, status } = useAuth();
   const { dispatch, recentDocuments } = useAppStore();
   const recentDocumentsRef = useRef(recentDocuments);
 
@@ -43,9 +45,10 @@ export const useStarSync = () => {
   }, [applyStarUpdate]);
 
   useEffect(() => {
+    if (status !== "authenticated" || !user) return;
     if (navigator.onLine) {
       void flushQueue().catch(() => undefined);
     }
     return syncOnReconnect({ flushQueue });
-  }, [flushQueue]);
+  }, [flushQueue, user?.id, status]);
 };
