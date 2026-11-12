@@ -91,7 +91,8 @@ export const Editor = () => {
     conflictState,
     discardLocalDraft,
     hydrationVersion,
-    reloadDocument
+    reloadDocument,
+    observeServerDocument
   } = useDocument(id, workspaceId, { shareToken: shareToken ?? undefined });
   const activeDocument = id ? (document?.id === id ? document : null) : document;
   const documentRef = useRef(activeDocument);
@@ -325,7 +326,7 @@ export const Editor = () => {
     [indexDocument]
   );
 
-  const handleContentChange = useCallback((nextContent: JSONContent) => {
+  const handleContentChange = useCallback((nextContent: JSONContent, yjsUpdate?: number[]) => {
     const currentDocument = documentRef.current;
     if (!currentDocument) {
       return;
@@ -338,7 +339,7 @@ export const Editor = () => {
     };
 
     documentRef.current = nextDocument;
-    updateDocumentRef.current(nextDocument);
+    updateDocumentRef.current(nextDocument, { yjsUpdate });
   }, []);
 
   const handleYjsUpdate = useCallback(
@@ -353,6 +354,9 @@ export const Editor = () => {
         return;
       }
 
+      const next = { ...currentDocument, content: nextContent as Record<string, unknown> };
+      documentRef.current = next;
+      setLocalDocument(next);
       debouncedYjsIndexUpdate({
         id: documentId,
         title: currentDocument.title ?? "",
@@ -360,10 +364,10 @@ export const Editor = () => {
         content: nextContent
       });
     },
-    [debouncedYjsIndexUpdate, id, workspaceId]
+    [debouncedYjsIndexUpdate, id, workspaceId, setLocalDocument]
   );
 
-  const handleTitleChange = useCallback((nextTitle: string) => {
+  const handleTitleChange = useCallback((nextTitle: string, yjsUpdate?: number[]) => {
     const currentDocument = documentRef.current;
     if (!currentDocument) {
       return;
@@ -376,7 +380,7 @@ export const Editor = () => {
     };
 
     documentRef.current = nextDocument;
-    updateDocumentRef.current(nextDocument);
+    updateDocumentRef.current(nextDocument, { yjsUpdate });
     
     // Update in recent documents list
     if (currentDocument.id) {
@@ -1178,6 +1182,7 @@ export const Editor = () => {
               contentVersion={hydrationVersion}
               editable={isEditable}
               onChange={handleContentChange}
+              onDurableDocument={observeServerDocument}
               onTitleChange={handleTitleChange}
               onStatsChange={setEditorStats}
               onYjsUpdate={handleYjsUpdate}

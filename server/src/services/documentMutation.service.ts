@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { withDocumentLock } from "../collaboration/documentCoordinator.js";
+import { prepareDocumentProjection, publishDocumentProjection } from "../collaboration/documentRooms.js";
 import { db } from "../config/db.js";
 import { mapDocumentRow, type DocumentModel } from "../models/document.model.js";
 import { createDocumentVersion, getDocumentVersion, type DocumentVersion } from "./documentVersion.service.js";
@@ -23,7 +25,7 @@ export type DocumentMutation = MutationGuard & {
 };
 export type MutationResult = { document: DocumentModel; version?: DocumentVersion; appliedChanges: number };
 
-export const mutateDocument = async (input: DocumentMutation): Promise<MutationResult> => {
+export const mutateDocument = (input: DocumentMutation): Promise<MutationResult> => withDocumentLock(input.documentId, async () => {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -73,12 +75,14 @@ export const mutateDocument = async (input: DocumentMutation): Promise<MutationR
       input.documentId, title, content, input.actorId, input.workspaceId, client
     );
     const result: MutationResult = { document, version, appliedChanges };
+    const projection = await prepareDocumentProjection(client, current, document);
     await client.query(
       "INSERT INTO document_mutations(document_id,actor_id,mutation_id,request_hash,response) VALUES($1,$2,$3,$4,$5)",
       [input.documentId, input.actorId, input.mutationId, fingerprint, JSON.stringify(result)]
     );
     await client.query("COMMIT");
+    publishDocumentProjection(document, projection);
     return result;
   } catch (error) { await client.query("ROLLBACK"); throw error; }
   finally { client.release(); }
-};
+});

@@ -1,4 +1,6 @@
 import { mutateDocument, requireMutationGuard } from "../services/documentMutation.service.js";
+import { closeDocumentRoom, mergeDocumentUpdate } from "../collaboration/documentRooms.js";
+import { getYjsManager } from "../collaboration/yjsServer.js";
 import { createHash, randomUUID } from "crypto";
 import { Router, type Response } from "express";
 import type { ShareTokenOptions } from "@shared/types.js";
@@ -557,6 +559,24 @@ documentRoutes.patch("/:id/star", async (req: AuthenticatedRequest, res, next) =
   } catch (error) {
     next(error);
   }
+});
+
+documentRoutes.patch("/:id/sync", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const userId = req.user?.id ?? "";
+    const access = await validateDocumentAccessWithShare(req.params.id, userId, req.shareToken);
+    if (!access.allowed || !canEditDocument(access.role)) { res.status(403).json({ message: "Access denied" }); return; }
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : access.workspaceId;
+    if (workspaceId !== access.workspaceId) { res.status(404).json({ message: "Document not found" }); return; }
+    const update = req.body.yjsUpdate;
+    if (!Array.isArray(update) || !update.length || !update.every((value: unknown) => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 255)) {
+      res.status(400).json({ message: "yjsUpdate must be an array of bytes" }); return;
+    }
+    await mergeDocumentUpdate(req.params.id, new Uint8Array(update), undefined, true);
+    const document = await getDocumentById(req.params.id, workspaceId, userId, { bypassAccessCheck: access.source === "share" });
+    await closeDocumentRoom(req.params.id, () => getYjsManager().getClientCount(req.params.id) > 0);
+    res.json({ document });
+  } catch (error) { next(error); }
 });
 
 documentRoutes.patch("/:id", async (req: AuthenticatedRequest, res, next) => {

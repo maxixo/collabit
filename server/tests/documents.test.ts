@@ -4,10 +4,13 @@ import { after, test } from "node:test";
 import { db } from "../src/config/db.js";
 import { mutateDocument } from "../src/services/documentMutation.service.js";
 import { setStarDocument } from "../src/services/document.service.js";
+import * as Y from "yjs";
+import { documentJson } from "../src/collaboration/documentCodec.js";
+import { openDocumentRoom, mergeDocumentUpdate, closeDocumentRoom, disposeDocumentRooms, flushDocumentRooms } from "../src/collaboration/documentRooms.js";
 
 if (!process.env.DATABASE_URL || !/^\/mvp_stack_[a-f0-9]{32}$/.test(new URL(process.env.DATABASE_URL).pathname))
   throw new Error("Integration tests require the disposable database owned by test:stack.");
-after(() => db.end());
+after(async () => { await disposeDocumentRooms(); await db.end(); });
 const fixture = async () => {
   const documentId = randomUUID();
   await db.query("INSERT INTO documents(id,title,content,owner_id,workspace_id) VALUES($1,'Original',$2,'owner','default')",
@@ -59,4 +62,56 @@ test("content acknowledgements preserve the caller's starred state", async () =>
   const input = await fixture();
   await setStarDocument(input.documentId, "owner", true);
   assert.equal((await mutateDocument({ ...input, title: "Still starred" })).document.isStarred, true);
+});
+
+const textNode = (doc: Y.Doc) => (doc.getXmlFragment("content").get(0) as Y.XmlElement).get(0) as Y.XmlText;
+const copyOf = (doc: Y.Doc) => { const copy = new Y.Doc(); Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc)); return copy; };
+test("concurrent first opens seed JSON once, and two edits survive room disposal and reload", async () => {
+  const input = await fixture();
+  await db.query("UPDATE documents SET content=$1 WHERE id=$2",
+    [JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "seed" }] }] }), input.documentId]);
+  const [first, second] = await Promise.all([openDocumentRoom(input.documentId), openDocumentRoom(input.documentId)]);
+  assert.equal(first, second);
+  const a = copyOf(first.doc), b = copyOf(first.doc);
+  textNode(a).insert(4, " alpha"); textNode(b).insert(4, " beta");
+  await Promise.all([mergeDocumentUpdate(input.documentId, Y.encodeStateAsUpdate(a)), mergeDocumentUpdate(input.documentId, Y.encodeStateAsUpdate(b))]);
+  const content = JSON.stringify(documentJson(first.doc));
+  assert.match(content, /alpha/); assert.match(content, /beta/);
+  const durableState = Array.from(Y.encodeStateVector(first.doc));
+  await closeDocumentRoom(input.documentId, () => false);
+  const reopened = await openDocumentRoom(input.documentId);
+  assert.deepEqual(Array.from(Y.encodeStateVector(reopened.doc)), durableState);
+  assert.equal(JSON.stringify(documentJson(reopened.doc)), content);
+  a.destroy(); b.destroy();
+});
+test("REST and history restore update an open room and preserve a stale offline draft as a conflict", async () => {
+  const input = await fixture();
+  const room = await openDocumentRoom(input.documentId);
+  const offline = copyOf(room.doc);
+  const saved = await mutateDocument({ ...input, kind: "save", content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "saved body" }] }] } });
+  assert.match(JSON.stringify(documentJson(room.doc)), /saved body/);
+  await mutateDocument({ ...input, mutationId: randomUUID(), expectedRevision: saved.document.revision, content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "new body" }] }] } });
+  const latest = room.document.revision;
+  await mutateDocument({ ...input, kind: "restore", mutationId: randomUUID(), expectedRevision: latest, versionNumber: 1 });
+  assert.match(JSON.stringify(documentJson(room.doc)), /saved body/);
+  await assert.rejects(mergeDocumentUpdate(input.documentId, Y.encodeStateAsUpdate(offline), undefined, true), { code: "COLLABORATION_REPLACED" });
+  offline.destroy();
+});
+test("a database failure cannot change or acknowledge the live room, and retry persists it", async () => {
+  const input = await fixture();
+  const room = await openDocumentRoom(input.documentId);
+  const next = copyOf(room.doc);
+  (next.getXmlFragment("content").get(0) as Y.XmlElement).insert(0, [new Y.XmlText("retained after outage")]);
+  const name = "mvp_fail_" + randomUUID().replaceAll("-", "");
+  await db.query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+    IF NEW.id='${input.documentId}' THEN RAISE EXCEPTION 'injected persistence failure'; END IF; RETURN NEW; END $$;
+    CREATE TRIGGER ${name} BEFORE UPDATE ON documents FOR EACH ROW EXECUTE FUNCTION ${name}();`);
+  try {
+    await assert.rejects(mergeDocumentUpdate(input.documentId, Y.encodeStateAsUpdate(next)), /injected persistence failure/);
+    assert.doesNotMatch(JSON.stringify(documentJson(room.doc)), /retained after outage/);
+    await assert.rejects(flushDocumentRooms(), /injected persistence failure/);
+  } finally { await db.query(`DROP TRIGGER ${name} ON documents; DROP FUNCTION ${name}();`); }
+  await mergeDocumentUpdate(input.documentId, Y.encodeStateAsUpdate(next));
+  assert.match(JSON.stringify(documentJson(room.doc)), /retained after outage/);
+  await flushDocumentRooms(); next.destroy();
 });

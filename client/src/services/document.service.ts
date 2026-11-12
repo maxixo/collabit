@@ -298,3 +298,15 @@ export const updateDocument = async (payload: {
   responseAccount(response);
   return data.document;
 };
+
+export const mergeDocument = async (
+  id: string, workspaceId: string, yjsUpdate: number[], options?: { shareToken?: string; account?: OfflineAccount }
+): Promise<DocumentDetail> => {
+  const params = new URLSearchParams({ workspaceId });
+  if (options?.shareToken) params.set("token", options.shareToken);
+  const response = await accountFetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(id)}/sync?${params}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ yjsUpdate })
+  }, options?.account);
+  const data = await parseJson<{ document: DocumentDetail }>(response);
+  return data.document;
+};

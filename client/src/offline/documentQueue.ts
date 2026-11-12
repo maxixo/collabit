@@ -1,5 +1,5 @@
 import type { DocumentDetail, TipTapContent } from "../services/document.service";
-import { fetchDocumentById, updateDocument, DocumentRequestError } from "../services/document.service";
+import { fetchDocumentById, updateDocument, mergeDocument, DocumentRequestError } from "../services/document.service";
 import { getOfflineAccount, isCurrentAccount, verifyOfflineSession, type OfflineAccount } from "./accountScope";
 import { createOfflineQueue, type OfflineQueueItem } from "./offlineQueue";
 import { replaceDocumentOperation, updateOperationIfPresent, discardDocumentOperation, saveServerDocument } from "./indexedDb";
@@ -51,6 +51,7 @@ export const enqueueDocumentUpdate = async (input: {
   documentId: string; workspaceId: string; title: string; content: TipTapContent;
   updatedAtClient: string; baseUpdatedAt?: string | null; shareToken?: string;
   baseRevision?: number;
+  yjsUpdate?: number[];
 }, account = getOfflineAccount()) => {
   const acknowledged = acknowledgedBases.get(account)?.get(input.documentId);
   const baseUpdatedAt = acknowledged && acknowledged.from === (input.baseUpdatedAt ?? null)
@@ -60,7 +61,8 @@ export const enqueueDocumentUpdate = async (input: {
     payload: {
       type: "document_update", operation: "update_title_content", title: input.title, content: input.content,
       updatedAtClient: input.updatedAtClient, baseUpdatedAt, shareToken: input.shareToken,
-      baseRevision: acknowledged && acknowledged.from === (input.baseUpdatedAt ?? null) ? acknowledged.revision : input.baseRevision
+      baseRevision: acknowledged && acknowledged.from === (input.baseUpdatedAt ?? null) ? acknowledged.revision : input.baseRevision,
+      yjsUpdate: input.yjsUpdate
     }
   };
   const persisted = await replaceDocumentOperation(entry, account) as DocumentQueueItem;
@@ -93,7 +95,7 @@ const replay = async (account: OfflineAccount) => {
     emit({ documentId: entry.documentId, status: "syncing" }, account);
     try {
       // Historical drafts can adopt a revision only when their known base still matches.
-      if (entry.payload.baseRevision === undefined) {
+      if (!entry.payload.yjsUpdate && entry.payload.baseRevision === undefined) {
         const server = await fetchDocumentById(entry.documentId, entry.workspaceId, { shareToken: entry.payload.shareToken, cache: false, account });
         if (!server) throw new DocumentRequestError("Document not found. Your local draft is retained.", 404);
         if (!entry.payload.baseUpdatedAt || hasDocumentConflict(entry.payload, server)) {
@@ -105,9 +107,11 @@ const replay = async (account: OfflineAccount) => {
         entry.payload.baseRevision = server.revision;
         await updateOperationIfPresent(entry, account);
       }
-      const document = await updateDocument({
+      const document = entry.payload.yjsUpdate
+        ? await mergeDocument(entry.documentId, entry.workspaceId, entry.payload.yjsUpdate, { shareToken: entry.payload.shareToken, account })
+        : await updateDocument({
         id: entry.documentId, workspaceId: entry.workspaceId, title: entry.payload.title, content: entry.payload.content,
-        expectedRevision: entry.payload.baseRevision, mutationId: entry.id
+        expectedRevision: entry.payload.baseRevision!, mutationId: entry.id
       }, { shareToken: entry.payload.shareToken, account });
       if (!isCurrentAccount(account)) return;
       let bases = acknowledgedBases.get(account);

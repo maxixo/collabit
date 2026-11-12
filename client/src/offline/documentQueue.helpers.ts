@@ -8,6 +8,7 @@ export type DocumentQueuePayload = {
   updatedAtClient: string;
   baseUpdatedAt?: string | null;
   baseRevision?: number;
+  yjsUpdate?: number[];
   shareToken?: string;
 };
 

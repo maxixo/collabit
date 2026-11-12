@@ -96,7 +96,7 @@ test("production API refuses pending migrations without bootstrapping schema", a
 test("status lists pending assets without creating schema on an empty database", async (t) => {
   const { pool, connectionString } = await withDatabase(t);
   const { stdout } = await runCli(connectionString, ["status"]);
-  assert.match(stdout, /0 applied, 10 pending/);
+  assert.match(stdout, /0 applied, 11 pending/);
   const { rows } = await pool.query("SELECT to_regclass('public.schema_migrations') AS table_name");
   assert.equal(rows[0].table_name, null);
 });
@@ -104,7 +104,7 @@ test("status lists pending assets without creating schema on an empty database",
 test("production CLI initializes auth and documents, repeats safely, and exits", async (t) => {
   const { pool, connectionString } = await withDatabase(t);
   const first = await runCli(connectionString, ["run"]);
-  assert.match(first.stdout, /Applied 10 new migration/);
+  assert.match(first.stdout, /Applied 11 new migration/);
   assert.doesNotMatch(first.stdout, /Server listening|WebSocket server initialized/);
   for (const table of ["user", "session", "account", "verification", "documents", "document_members", "document_suggestions"]) {
     const { rows } = await pool.query("SELECT to_regclass($1) AS table_name", [`public.${table}`]);
@@ -115,7 +115,7 @@ test("production CLI initializes auth and documents, repeats safely, and exits",
   assert.match(second.stdout, /Applied 0 new migration/);
   assert.deepEqual((await pool.query("SELECT * FROM schema_migrations ORDER BY filename")).rows, before);
   const source = await runCli(connectionString, ["status"], true);
-  assert.match(source.stdout, /10 applied, 0 pending/);
+  assert.match(source.stdout, /11 applied, 0 pending/);
 });
 
 test("concurrent processes coordinate auth and application migrations", async (t) => {
@@ -127,7 +127,7 @@ test("concurrent processes coordinate auth and application migrations", async (t
     }
   }
   const { rows } = await pool.query("SELECT COUNT(*)::int AS count FROM schema_migrations");
-  assert.equal(rows[0].count, 10);
+  assert.equal(rows[0].count, 11);
 });
 
 test("a failed migration rolls back DDL and tracking, then retries without repeating earlier files", async (t) => {
@@ -198,7 +198,7 @@ test("upgrade preserves existing documents, memberships, and migration timestamp
   assert.equal((await pool.query("SELECT role FROM document_members WHERE document_id = 'preserved'")).rows[0].role, "owner");
   assert.deepEqual((await pool.query("SELECT * FROM schema_migrations ORDER BY filename LIMIT 5")).rows, before);
   assert.equal((await pool.query("SELECT revision FROM documents LIMIT 1")).rows[0].revision, 0);
-  assert.equal((await pool.query("SELECT COUNT(*)::int AS count FROM schema_migrations")).rows[0].count, 10);
+  assert.equal((await pool.query("SELECT COUNT(*)::int AS count FROM schema_migrations")).rows[0].count, 11);
 });
 
 test("targeted runs include prerequisites and reject arbitrary paths", async (t) => {

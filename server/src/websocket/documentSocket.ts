@@ -138,7 +138,7 @@ const handleDocumentOpen = async (
     logger.info(`User ${metadata.userId} opened document ${documentId}`);
 
     // Attach YJS server to this WebSocket connection for real-time collaboration
-    yjsServer.attach(socket, {
+    await yjsServer.attach(socket, {
       documentId,
       userId: metadata.userId,
       canWrite: role === "editor" || role === "owner"
