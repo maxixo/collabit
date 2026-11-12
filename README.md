@@ -78,6 +78,8 @@ npm run build
 
 ### Playwright Editor Checks
 
+For a fresh database and managed application lifecycle, use `npm run test:stack`. See [isolated MVP test setup](client/tests/README.md) for PostgreSQL/browser prerequisites, safety guards, and failure evidence.
+
 Run the app stack first, then execute the browser regression suite from the client workspace:
 
 ```bash

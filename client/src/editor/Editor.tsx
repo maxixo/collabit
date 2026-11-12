@@ -515,6 +515,10 @@ export const EditorSurface = ({
   const safeEditor = documentId ? editor : null;
 
   useEffect(() => {
+    lastHydratedKey.current = null;
+  }, [safeEditor]);
+
+  useEffect(() => {
     if (!safeEditor) {
       return;
     }
@@ -553,6 +557,9 @@ export const EditorSurface = ({
       return;
     }
     const hydrationKey = `${documentId ?? "local"}:${contentVersion}`;
+    if (loading || error) {
+      return;
+    }
     if (lastHydratedKey.current === hydrationKey) {
       return;
     }
@@ -578,7 +585,7 @@ export const EditorSurface = ({
     safeEditor.commands.focus("end");
     lastHydratedKey.current = hydrationKey;
     updateStats(safeEditor);
-  }, [safeEditor, content, documentId, contentVersion, updateStats, clearSuggestionHideTimeout]);
+  }, [safeEditor, content, documentId, contentVersion, loading, error, updateStats, clearSuggestionHideTimeout]);
 
   useEffect(() => {
     if (!safeEditor) {

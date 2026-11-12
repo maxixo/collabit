@@ -110,7 +110,7 @@ export const buildShareUrl = (documentId: string, token: string, workspaceId = W
 
 export const openWorkspace = async (page: Page, workspaceId = WORKSPACE_ID) => {
   await page.goto(`/editor/recent?workspaceId=${encodeURIComponent(workspaceId)}`);
-  await expect(page.getByTestId("create-document-button")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Create New/ })).toBeVisible();
 };
 
 export const openDocument = async (page: Page, documentId: string, workspaceId = WORKSPACE_ID) => {

@@ -11,9 +11,10 @@ export default defineConfig({
     timeout: 10_000
   },
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"], ["html"]],
+  reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL,
+    serviceWorkers: "block",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure"

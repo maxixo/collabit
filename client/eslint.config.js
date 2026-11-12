@@ -8,7 +8,7 @@ import refresh from "eslint-plugin-react-refresh";
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**"]
+    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**"]
   },
   js.configs.recommended,
   {

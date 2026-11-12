@@ -50,3 +50,22 @@ jobs:
         run: npm run test:migrations --workspace server
         env:
           MIGRATION_TEST_DATABASE_URL: postgresql://mvp_test:migration-test-only@127.0.0.1:5432/postgres
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+        working-directory: client
+
+      - name: Isolated API and browser tests
+        run: npm run test:stack
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://mvp_test:migration-test-only@127.0.0.1:5432/postgres
+
+      - name: Retain test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-evidence
+          path: |
+            test-results/
+            client/test-results/
+            client/playwright-report/

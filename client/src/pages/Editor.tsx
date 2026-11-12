@@ -737,7 +737,7 @@ export const Editor = () => {
 
   const editorContent = (activeDocument?.content as JSONContent) ?? emptyContent;
   const effectiveError = shareValidationError ?? error;
-  const effectiveLoading = loading || isValidatingShare;
+  const effectiveLoading = loading || isValidatingShare || Boolean(documentId && !activeDocument && !effectiveError);
   const isEditable = Boolean(activeDocument) && !effectiveLoading && !effectiveError && Boolean(workspaceId) && !isShareViewer;
   const searchActive = searchQuery.trim().length > 0;
 
