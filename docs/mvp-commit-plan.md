@@ -1,6 +1,6 @@
 # MVP commit roadmap
 
-Status: C00 through C06 complete. Updated 12 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
+Status: C00 through C08 complete. Updated 12 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
 
 The [completion overview](mvp-completion-plan.md) contains the full product scope and acceptance matrix. Numbers identify roadmap items; the verification record below identifies completed commits. Mark an item complete only when its changes and passing verification record are committed together.
 
@@ -28,7 +28,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | [x] | C05 | `fix(offline): retain drafts until conflicts are resolved` | Data safety |
 | [x] | C06 | `fix(documents): reject stale writes and make replay retry-safe` | Data safety |
 | [x] | C07 | `fix(collaboration): persist rooms and synchronize document state` | Collaboration |
-| [ ] | C08 | `fix(server): drain sockets and flush pending state on shutdown` | Collaboration |
+| [x] | C08 | `fix(server): drain sockets and flush pending state on shutdown` | Collaboration |
 | [ ] | C09 | `fix(sharing): enforce grant lifecycle and collaborator removal` | Access control |
 | [ ] | C10 | `fix(security): validate API payloads and constrain socket traffic` | Access control |
 | [ ] | C11 | `fix(offline): build the service worker and restore cached sessions` | Essential UX |
@@ -209,7 +209,9 @@ C06 verification: this commit, resolved by `git log -1 --format=%h --grep="^fix(
 
 C07 verification: persisted Yjs snapshots are stored with their document revision; one awaited room load seeds legacy JSON once, guarded REST/history projections update active room state and snapshots, and acknowledged socket edits are committed before broadcast. Provider readiness prevents premature hydration, and stale offline full-state syncs remain recoverable conflicts after a replacement. `npm run test:stack -- --with-migrations` passed 9 migration regressions, 9 database/service/lifecycle tests, and 16 browser/API tests, including two live editors converging on the same durable document.
 
-C06 checks passed: full lint/typecheck/unit/build gate; 13 helper tests and 12 account/queue regressions; 9 migration/upgrade regressions; 5 database mutation/star regressions; 15 browser/API cases, including racing HTTP writes, repeated saves, stale history restore, desired-star retries, and the complete offline recovery suite. The test stack owns its database and runs service integration tests before browser checks; `--with-migrations` also runs migration tests on its temporary cluster. This is schema-additive, but older unguarded writers must stay stopped after upgrading; see the migration compatibility notes. C08 and C09 remain next.
+C08 verification: shutdown marks the API unready, rejects new API work and WebSocket upgrades, waits for authenticated socket setup and queued durable writes, closes sessions/rooms, then closes the HTTP server and sole PostgreSQL pool. A process-level test sends an acknowledged Yjs edit through an active socket, shuts down, restarts on the same database, and reads the edit back. A database trigger holds a write in flight; shutdown exits with failure at its configured deadline instead of hanging or claiming a clean flush. `npm run test:stack -- --reuse-server-build` passed 10 server integration/lifecycle tests and all 16 browser/API tests. The full `npm run ci:check` quality gate passed; existing six Fast Refresh warnings, stale Browserslist data warning, and editor chunk-size warning remain.
+
+C06 checks passed: full lint/typecheck/unit/build gate; 13 helper tests and 12 account/queue regressions; 9 migration/upgrade regressions; 5 database mutation/star regressions; 15 browser/API cases, including racing HTTP writes, repeated saves, stale history restore, desired-star retries, and the complete offline recovery suite. The test stack owns its database and runs service integration tests before browser checks; `--with-migrations` also runs migration tests on its temporary cluster. This is schema-additive, but older unguarded writers must stay stopped after upgrading; see the migration compatibility notes. C09 remains next.
 
 C05 verification: this commit, resolved with `git log -1 --format=%h --grep="^fix(offline): retain drafts until conflicts are resolved$"`. Every edit enters durable storage before the network debounce. Pending/conflict/rejected operations survive reload and account changes; server reads preserve pending local content; only acknowledged generations or explicitly discarded snapshots are removed. Conflicts retain separate server/local bodies. Profile lists retained drafts with download, retry, and confirmed discard. Duplicate resolves only after a successful server copy; download/close preserve the draft. Explicit discard atomically removes the operation and cached local body. Editor initialization and editability events cannot enqueue empty or unchanged snapshots.
 

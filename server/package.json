@@ -17,7 +17,7 @@
     "migrations:run:prod": "node dist/migrate.js run",
     "migrations:status:prod": "node dist/migrate.js status",
     "test:migrations": "tsx --test tests/migrations.test.ts",
-    "test:integration": "tsx --test tests/documents.test.ts"
+    "test:integration": "tsx --test tests/documents.test.ts tests/lifecycle.test.ts"
   },
   "dependencies": {
     "@collab/shared": "*",
