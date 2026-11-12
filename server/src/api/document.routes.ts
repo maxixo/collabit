@@ -1,4 +1,5 @@
-import { randomUUID } from "crypto";
+import { mutateDocument, requireMutationGuard } from "../services/documentMutation.service.js";
+import { createHash, randomUUID } from "crypto";
 import { Router, type Response } from "express";
 import type { ShareTokenOptions } from "@shared/types.js";
 import type { DocumentModel } from "../models/document.model.js";
@@ -16,14 +17,11 @@ import {
   moveToTrash,
   permanentlyDeleteDocument,
   restoreFromTrash,
-  toggleStarDocument,
-  updateDocument,
+  setStarDocument,
   validateDocumentAccessWithShare
 } from "../services/document.service.js";
 import {
-  getPendingChanges,
-  markAllChangesApplied,
-  markChangesApplied
+  getPendingChanges
 } from "../services/changeEvent.service.js";
 import {
   acceptSuggestions,
@@ -44,9 +42,7 @@ import {
   validateShareToken
 } from "../services/shareToken.service.js";
 import {
-  getDocumentVersions,
-  restoreDocumentVersion,
-  createDocumentVersion
+  getDocumentVersions
 } from "../services/documentVersion.service.js";
 
 export const documentRoutes = Router();
@@ -293,7 +289,8 @@ documentRoutes.post("/", async (req: AuthenticatedRequest, res, next) => {
       updatedAt: new Date().toISOString(),
       ownerId: userId,
       workspaceId,
-      isStarred: false
+      isStarred: false,
+      revision: 0
     };
 
     try {
@@ -552,7 +549,10 @@ documentRoutes.patch("/:id/star", async (req: AuthenticatedRequest, res, next) =
       return;
     }
 
-    const result = await toggleStarDocument(req.params.id, userId);
+    if (typeof req.body.isStarred !== "boolean") {
+      res.status(400).json({ message: "isStarred must be a boolean" }); return;
+    }
+    const result = await setStarDocument(req.params.id, userId, req.body.isStarred);
     res.json({ documentId: req.params.id, isStarred: result.isStarred });
   } catch (error) {
     next(error);
@@ -595,17 +595,11 @@ documentRoutes.patch("/:id", async (req: AuthenticatedRequest, res, next) => {
       return;
     }
 
-    const updated = await updateDocument({
-      id: req.params.id,
-      workspaceId,
-      title: title?.trim(),
-      content
+    const { document: updated } = await mutateDocument({
+      ...requireMutationGuard(req.body), documentId: req.params.id, workspaceId,
+      actorId: userId || "share:" + createHash("sha256").update(shareToken ?? "").digest("hex"),
+      kind: "update", title: title?.trim(), content
     });
-
-    if (!updated) {
-      res.status(404).json({ message: "Document not found" });
-      return;
-    }
 
     if (access.source === "share" && access.shareToken && userId) {
       await autoJoinDocumentViaShare(
@@ -894,17 +888,18 @@ documentRoutes.post("/:id/restore", async (req: AuthenticatedRequest, res, next)
       return;
     }
 
-    const restoredContent = await restoreDocumentVersion(
-      req.params.id,
-      versionNumber,
-      workspaceId
-    );
+    const { document: restored } = await mutateDocument({
+      ...requireMutationGuard(req.body), documentId: req.params.id, workspaceId,
+      actorId: userId || "share:" + createHash("sha256").update(shareToken ?? "").digest("hex"),
+      kind: "restore", versionNumber
+    });
 
     res.json({
       documentId: req.params.id,
       versionNumber,
       restored: true,
-      content: restoredContent,
+      content: restored.content,
+      document: restored,
       message: `Document restored to version ${versionNumber}`
     });
   } catch (error) {
@@ -954,61 +949,16 @@ documentRoutes.post("/:id/save", async (req: AuthenticatedRequest, res, next) =>
       content?: Record<string, unknown>;
     };
 
-    let appliedCount = 0;
-    if (applyPendingChanges) {
-      if (specificUserChanges && specificUserChanges.length > 0) {
-        // Apply specific user's changes
-        for (const targetUserId of specificUserChanges) {
-          const count = await markChangesApplied(req.params.id, targetUserId, workspaceId);
-          appliedCount += count;
-        }
-      } else {
-        // Apply all pending changes
-        appliedCount = await markAllChangesApplied(req.params.id, workspaceId);
-      }
-    }
-
-    let versionSourceDocument = await getDocumentById(req.params.id, workspaceId, userId);
-    if (!versionSourceDocument) {
-      res.status(404).json({ message: "Document not found" });
-      return;
-    }
-
-    if (typeof title !== "undefined" || typeof content !== "undefined") {
-      const updated = await updateDocument({
-        id: req.params.id,
-        workspaceId,
-        title: title?.trim(),
-        content
-      });
-
-      if (!updated) {
-        res.status(404).json({ message: "Document not found" });
-        return;
-      }
-      versionSourceDocument = updated;
-    }
-
-    if (access.source === "share" && access.shareToken && userId) {
-      await autoJoinDocumentViaShare(
-        req.params.id,
-        userId,
-        access.shareToken.token,
-        access.shareToken.permissionLevel
-      );
-    }
-
-    const version = await createDocumentVersion(
-      versionSourceDocument.id,
-      versionSourceDocument.title,
-      versionSourceDocument.content,
-      userId,
-      workspaceId
-    );
+    const { document, version, appliedChanges: appliedCount } = await mutateDocument({
+      ...requireMutationGuard(req.body), documentId: req.params.id, workspaceId, actorId: userId,
+      kind: "save", title: title?.trim(), content, applyPendingChanges, specificUserChanges
+    });
+    if (!version) throw new Error("Version save did not create a version");
 
     res.json({
       documentId: req.params.id,
       saved: true,
+      document,
       versionNumber: version.versionNumber,
       versionCreatedAt: version.createdAt,
       versionCreatedBy: version.createdBy,

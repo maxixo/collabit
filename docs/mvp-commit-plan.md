@@ -1,6 +1,6 @@
 # MVP commit roadmap
 
-Status: C00 through C05 complete. Updated 12 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
+Status: C00 through C06 complete. Updated 12 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
 
 The [completion overview](mvp-completion-plan.md) contains the full product scope and acceptance matrix. Numbers identify roadmap items; the verification record below identifies completed commits. Mark an item complete only when its changes and passing verification record are committed together.
 
@@ -26,7 +26,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | [x] | C03 | `test(mvp): add isolated database and browser test stack` | Reliable checks |
 | [x] | C04 | `fix(offline): isolate cached data and replay by account` | Data safety |
 | [x] | C05 | `fix(offline): retain drafts until conflicts are resolved` | Data safety |
-| [ ] | C06 | `fix(documents): reject stale writes and make replay retry-safe` | Data safety |
+| [x] | C06 | `fix(documents): reject stale writes and make replay retry-safe` | Data safety |
 | [ ] | C07 | `fix(collaboration): persist rooms and synchronize document state` | Collaboration |
 | [ ] | C08 | `fix(server): drain sockets and flush pending state on shutdown` | Collaboration |
 | [ ] | C09 | `fix(sharing): enforce grant lifecycle and collaborator removal` | Access control |
@@ -204,6 +204,10 @@ Add entries here as implementation commits land. The planning document itself do
 | C02 | This migration commit; resolve with `git log -1 --format=%h --grep="^fix(db): make migrations standalone and coordinated$"`. | `npm run ci:check`; `npm run test:migrations --workspace server` against the disposable localhost PostgreSQL cluster; documentation links and staged scope/whitespace review. | Passed on Node 22.20.0 and PostgreSQL 18.1: 13 helper tests plus 9 database regressions. Covers production startup refusing pending schema, fresh/status/repeat/concurrent runs, SQL/tracking rollback and retry, asset errors, prerequisite ordering, upgrade preservation, and CLI exit. Corrected the compiled backend/CLI layout and shared runtime imports. Existing SQL files unchanged. CI configured for disposable PostgreSQL 16; remote CI has not been run. |
 
 ## First commit staging boundary
+
+C06 verification: this commit, resolved by `git log -1 --format=%h --grep="^fix(documents): reject stale writes and make replay retry-safe$"`. Added document revisions and a per-actor mutation receipt ledger. Patch, version save, and history restore lock the document, check the expected revision, and commit the document, version/change flags, and receipt together. Repeated identities return the original acknowledgement; reusing an identity for different input fails. Missing guards return 428 and stale writers receive 409 with the current document. Offline replay preserves operation identities and durable conflicts. Stars use explicit desired states with serialized replay rather than toggle parity.
+
+C06 checks passed: full lint/typecheck/unit/build gate; 13 helper tests and 12 account/queue regressions; 9 migration/upgrade regressions; 5 database mutation/star regressions; 15 browser/API cases, including racing HTTP writes, repeated saves, stale history restore, desired-star retries, and the complete offline recovery suite. The test stack owns its database and now runs service integration tests before browser checks; `--with-migrations` also runs migration tests on its temporary cluster. This is schema-additive, but older unguarded writers must stay stopped after upgrading; see the migration compatibility notes. C07/C08 remain next.
 
 C05 verification: this commit, resolved with `git log -1 --format=%h --grep="^fix(offline): retain drafts until conflicts are resolved$"`. Every edit enters durable storage before the network debounce. Pending/conflict/rejected operations survive reload and account changes; server reads preserve pending local content; only acknowledged generations or explicitly discarded snapshots are removed. Conflicts retain separate server/local bodies. Profile lists retained drafts with download, retry, and confirmed discard. Duplicate resolves only after a successful server copy; download/close preserve the draft. Explicit discard atomically removes the operation and cached local body. Editor initialization and editability events cannot enqueue empty or unchanged snapshots.
 

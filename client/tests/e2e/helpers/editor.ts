@@ -7,6 +7,7 @@ type TestUser = {
 };
 
 type CreatedDocument = {
+  revision: number;
   id: string;
   title: string;
   updatedAt: string;

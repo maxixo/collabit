@@ -6,6 +6,7 @@ type HttpError = Error & {
   status?: number;
   statusCode?: number;
   code?: string;
+  document?: unknown;
 };
 
 export const errorMiddleware = (
@@ -28,6 +29,7 @@ export const errorMiddleware = (
 
   res.status(statusCode).json({
     message,
-    code: statusCode >= 500 ? "INTERNAL_ERROR" : httpError.code
+    code: statusCode >= 500 ? "INTERNAL_ERROR" : httpError.code,
+    document: statusCode === 409 ? httpError.document : undefined
   });
 };

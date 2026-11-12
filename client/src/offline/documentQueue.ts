@@ -15,7 +15,7 @@ export type QueueStatusEvent = {
 const queue = createOfflineQueue();
 const EVENT = "document-queue-status";
 const flights = new Map<OfflineAccount, Promise<void>>();
-const acknowledgedBases = new WeakMap<OfflineAccount, Map<string, { from: string | null; to: string }>>();
+const acknowledgedBases = new WeakMap<OfflineAccount, Map<string, { from: string | null; to: string; revision?: number }>>();
 const isDocument = (item: OfflineQueueItem): item is DocumentQueueItem => {
   const payload = item.payload as Partial<DocumentQueuePayload> | null;
   return typeof item.workspaceId === "string" && payload?.type === "document_update" &&
@@ -50,6 +50,7 @@ export const listQueuedDocumentUpdates = async (account = getOfflineAccount()) =
 export const enqueueDocumentUpdate = async (input: {
   documentId: string; workspaceId: string; title: string; content: TipTapContent;
   updatedAtClient: string; baseUpdatedAt?: string | null; shareToken?: string;
+  baseRevision?: number;
 }, account = getOfflineAccount()) => {
   const acknowledged = acknowledgedBases.get(account)?.get(input.documentId);
   const baseUpdatedAt = acknowledged && acknowledged.from === (input.baseUpdatedAt ?? null)
@@ -58,7 +59,8 @@ export const enqueueDocumentUpdate = async (input: {
     id: crypto.randomUUID(), documentId: input.documentId, workspaceId: input.workspaceId, createdAt: Date.now(),
     payload: {
       type: "document_update", operation: "update_title_content", title: input.title, content: input.content,
-      updatedAtClient: input.updatedAtClient, baseUpdatedAt, shareToken: input.shareToken
+      updatedAtClient: input.updatedAtClient, baseUpdatedAt, shareToken: input.shareToken,
+      baseRevision: acknowledged && acknowledged.from === (input.baseUpdatedAt ?? null) ? acknowledged.revision : input.baseRevision
     }
   };
   const persisted = await replaceDocumentOperation(entry, account) as DocumentQueueItem;
@@ -90,32 +92,44 @@ const replay = async (account: OfflineAccount) => {
     if (!isCurrentAccount(account)) return;
     emit({ documentId: entry.documentId, status: "syncing" }, account);
     try {
-      const server = await fetchDocumentById(entry.documentId, entry.workspaceId, { shareToken: entry.payload.shareToken, cache: false, account });
-      if (!server) throw new DocumentRequestError("Document not found. Your local draft is retained.", 404);
-      if (hasDocumentConflict(entry.payload, server)) {
-        const conflict: DocumentQueueItem = { ...entry, payload: { ...entry.payload, sync: { status: "conflict", server } } };
-        if (await updateOperationIfPresent(conflict, account)) emitStored(conflict, account);
-        continue;
+      // Historical drafts can adopt a revision only when their known base still matches.
+      if (entry.payload.baseRevision === undefined) {
+        const server = await fetchDocumentById(entry.documentId, entry.workspaceId, { shareToken: entry.payload.shareToken, cache: false, account });
+        if (!server) throw new DocumentRequestError("Document not found. Your local draft is retained.", 404);
+        if (!entry.payload.baseUpdatedAt || hasDocumentConflict(entry.payload, server)) {
+          const conflict: DocumentQueueItem = { ...entry, payload: { ...entry.payload, sync: { status: "conflict", server } } };
+          if (await updateOperationIfPresent(conflict, account)) emitStored(conflict, account);
+          continue;
+        }
+        if (server.revision === undefined) throw new DocumentRequestError("Reload after the server upgrade. Draft retained.", 428);
+        entry.payload.baseRevision = server.revision;
+        await updateOperationIfPresent(entry, account);
       }
       const document = await updateDocument({
-        id: entry.documentId, workspaceId: entry.workspaceId, title: entry.payload.title, content: entry.payload.content
+        id: entry.documentId, workspaceId: entry.workspaceId, title: entry.payload.title, content: entry.payload.content,
+        expectedRevision: entry.payload.baseRevision, mutationId: entry.id
       }, { shareToken: entry.payload.shareToken, account });
       if (!isCurrentAccount(account)) return;
       let bases = acknowledgedBases.get(account);
       if (!bases) { bases = new Map(); acknowledgedBases.set(account, bases); }
-      bases.set(entry.documentId, { from: entry.payload.baseUpdatedAt ?? null, to: document.updatedAt });
+      bases.set(entry.documentId, { from: entry.payload.baseUpdatedAt ?? null, to: document.updatedAt, revision: document.revision });
       // Remove only the acknowledged generation, never a newer edit queued during the request.
       for (const previous of items.filter((item) => item.documentId === entry.documentId && item.workspaceId === entry.workspaceId))
         await queue.remove(previous.id, account);
       const newer = await getQueuedDocumentUpdate(entry.documentId, account);
       if (newer && newer.payload.baseUpdatedAt === entry.payload.baseUpdatedAt &&
         (!newer.payload.sync || newer.payload.sync.status === "pending")) {
-        await updateOperationIfPresent({ ...newer, payload: { ...newer.payload, baseUpdatedAt: document.updatedAt } }, account);
+        await updateOperationIfPresent({ ...newer, payload: { ...newer.payload, baseUpdatedAt: document.updatedAt, baseRevision: document.revision } }, account);
       }
       await saveServerDocument(document, account);
       emit({ documentId: entry.documentId, status: "saved", document, operationId: entry.id }, account);
     } catch (error) {
       if (!isCurrentAccount(account)) return;
+      if (error instanceof DocumentRequestError && error.status === 409 && error.document) {
+        const conflict: DocumentQueueItem = { ...entry, payload: { ...entry.payload, sync: { status: "conflict", server: error.document } } };
+        if (await updateOperationIfPresent(conflict, account)) emitStored(conflict, account);
+        continue;
+      }
       const retryable = error instanceof TypeError || !navigator.onLine ||
         (error instanceof DocumentRequestError && (error.status >= 500 || error.status === 429));
       const failed: DocumentQueueItem = { ...entry, payload: { ...entry.payload, sync: {

@@ -7,6 +7,7 @@ export type DocumentQueuePayload = {
   content: TipTapContent;
   updatedAtClient: string;
   baseUpdatedAt?: string | null;
+  baseRevision?: number;
   shareToken?: string;
 };
 

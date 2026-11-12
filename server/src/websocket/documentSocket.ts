@@ -153,7 +153,8 @@ const handleDocumentOpen = async (
         ownerId: document.ownerId,
         workspaceId: document.workspaceId,
         isStarred: document.isStarred,
-        content: document.content
+        content: document.content,
+        revision: document.revision
       }
     };
 
@@ -222,7 +223,8 @@ const handleSyncRequest = async (
         ownerId: document.ownerId,
         workspaceId: document.workspaceId,
         isStarred: document.isStarred,
-        content: document.content
+        content: document.content,
+        revision: document.revision
       }
     };
 

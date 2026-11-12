@@ -150,7 +150,8 @@ export const useDocument = (documentId?: string, workspaceId?: string, options?:
     writes.current++;
     const pending = enqueueDocumentUpdate({
       documentId: next.id, workspaceId: next.workspaceId || workspaceId || "default", title: next.title,
-      content: next.content, updatedAtClient: next.updatedAt, baseUpdatedAt: synced.current?.updatedAt ?? null, shareToken
+      content: next.content, updatedAtClient: next.updatedAt, baseUpdatedAt: synced.current?.updatedAt ?? null,
+      baseRevision: synced.current?.revision ?? next.revision, shareToken
     }, account);
     latestWrite.current = pending;
     void cacheDocument(next, account).catch(() => {});

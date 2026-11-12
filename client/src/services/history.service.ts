@@ -1,3 +1,4 @@
+import { accountFetch } from "../offline/accountScope";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 
 export interface DocumentVersion {
@@ -14,6 +15,8 @@ export interface DocumentVersion {
 
 type HistoryRequestOptions = {
   shareToken?: string;
+  expectedRevision?: number;
+  mutationId?: string;
 };
 
 const buildHistoryUrl = (
@@ -51,7 +54,7 @@ export const getDocumentHistory = async (
   workspaceId: string,
   options?: HistoryRequestOptions
 ): Promise<DocumentVersion[]> => {
-  const response = await fetch(buildHistoryUrl(documentId, "history", workspaceId, options), {
+  const response = await accountFetch(buildHistoryUrl(documentId, "history", workspaceId, options), {
     method: "GET",
     credentials: "include",
     headers: {
@@ -77,13 +80,13 @@ export const restoreDocumentVersion = async (
   workspaceId: string,
   options?: HistoryRequestOptions
 ): Promise<{ message: string; content: Record<string, unknown> }> => {
-  const response = await fetch(buildHistoryUrl(documentId, "restore", workspaceId, options), {
+  const response = await accountFetch(buildHistoryUrl(documentId, "restore", workspaceId, options), {
     method: "POST",
     credentials: "include",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ versionNumber })
+    body: JSON.stringify({ versionNumber, expectedRevision: options?.expectedRevision, mutationId: options?.mutationId })
   });
 
   if (!response.ok) {

@@ -1,6 +1,7 @@
 export type TipTapContent = Record<string, unknown>;
 
 export interface DocumentState {
+  revision?: number;
   id: string;
   title: string;
   updatedAt: string;

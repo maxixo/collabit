@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { accountFetch } from "../offline/accountScope";
+import { fetchDocumentById } from "../services/document.service";
 import { useAppStore, actions } from "../app/store";
 import { useAuth } from "../auth/AuthContext";
 import type { DocumentSuggestion, SuggestionBatchSummary } from "@shared/types";
@@ -15,6 +17,7 @@ interface UsePendingChangesOptions {
 }
 
 interface SaveDocumentOptions {
+  expectedRevision?: number;
   applyPendingChanges: boolean;
   specificUserChanges?: string[];
   title?: string;
@@ -59,6 +62,7 @@ export const usePendingChanges = ({
   const [isSaving, setIsSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<DocumentSuggestion[]>([]);
+  const pendingMutation = useRef<{ key: string; id: string } | null>(null);
   const { dispatch, pendingChanges: pendingChangesMap } = useAppStore();
   const { user: currentUser } = useAuth();
   const pendingChanges = useMemo<SuggestionBatchSummary[]>(() => pendingChangesMap[documentId] ?? [], [documentId, pendingChangesMap]);
@@ -133,7 +137,7 @@ export const usePendingChanges = ({
 
   const versionSaveDocument = useCallback(
     async (options: SaveDocumentOptions = { applyPendingChanges: true }) => {
-      if (!enabled || !documentId || !workspaceId || !currentUser) {
+      if (!documentId || !workspaceId || !currentUser) {
         throw new Error("Missing required parameters");
       }
 
@@ -142,7 +146,10 @@ export const usePendingChanges = ({
         setError(null);
         dispatch(actions.setSaveStatus("saving"));
 
-        const response = await fetch(buildVersionSaveUrl(documentId, workspaceId, shareToken), {
+        if (options.expectedRevision === undefined) throw new Error("Reload the document before saving a version.");
+        const key = JSON.stringify([documentId, options]);
+        if (pendingMutation.current?.key !== key) pendingMutation.current = { key, id: crypto.randomUUID() };
+        const response = await accountFetch(buildVersionSaveUrl(documentId, workspaceId, shareToken), {
           method: "POST",
           credentials: "include",
           headers: {
@@ -150,6 +157,7 @@ export const usePendingChanges = ({
           },
           body: JSON.stringify({
             ...options,
+            mutationId: pendingMutation.current.id,
             saveType: "version"
           })
         });
@@ -159,6 +167,7 @@ export const usePendingChanges = ({
         }
 
         const result = await response.json();
+        await fetchDocumentById(documentId, workspaceId, { shareToken });
         dispatch(actions.setSaveStatus("saved"));
         await fetchPendingChanges();
         return result;

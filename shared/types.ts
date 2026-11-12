@@ -15,6 +15,7 @@ export interface DocumentSummary {
 }
 
 export interface DocumentDetail extends DocumentSummary {
+  revision: number;
   content: TipTapContent;
 }
 
