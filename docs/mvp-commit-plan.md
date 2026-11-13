@@ -29,7 +29,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | [x] | C06 | `fix(documents): reject stale writes and make replay retry-safe` | Data safety |
 | [x] | C07 | `fix(collaboration): persist rooms and synchronize document state` | Collaboration |
 | [x] | C08 | `fix(server): drain sockets and flush pending state on shutdown` | Collaboration |
-| [ ] | C09 | `fix(sharing): enforce grant lifecycle and collaborator removal` | Access control |
+| [x] | C09 | `fix(sharing): enforce grant lifecycle and collaborator removal` | Access control |
 | [ ] | C10 | `fix(security): validate API payloads and constrain socket traffic` | Access control |
 | [ ] | C11 | `fix(offline): build the service worker and restore cached sessions` | Essential UX |
 | [ ] | C12 | `feat(auth): implement password recovery and provider availability` | Essential UX |
@@ -196,6 +196,8 @@ This is one coherent cross-stack change: do not enable persistent room hydration
 ## Verification record
 
 Add entries here as implementation commits land. The planning document itself does not demonstrate that the MVP is finished.
+
+C09 verification: share-link inspection no longer increments usage; a row-locked transaction increments usage only when a new member is inserted, so reconnects do not consume another redemption and `maxUses` cannot be raced. Owner-only collaborator endpoints list, change, and remove members; access changes close that member's sockets. Link revocation closes guest sockets while preserving existing membership. Targeted `test:stack -- --grep "share validation" --reuse-server-build` passed with the disposable PostgreSQL database.
 
 | Plan ID | Commit hash | Commands/scenarios checked | Outcome / remaining limitation |
 | --- | --- | --- | --- |

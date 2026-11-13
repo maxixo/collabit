@@ -48,6 +48,7 @@ class YjsDocumentManager {
   }
   async attach(ws: WebSocket, options: Options) {
     if (!this.accepting) { ws.close(1012, "Server is shutting down"); return; }
+    if (this.getClientCount(options.documentId) >= 64) { ws.close(1013, "Document connection limit reached"); return; }
     await withDocumentRoom(options.documentId, (room) => {
       if (!this.accepting || ws.readyState !== WebSocket.OPEN) return;
       this.bind(room, options.documentId);
@@ -122,6 +123,18 @@ class YjsDocumentManager {
   }
   disconnectDocument(id: string) {
     this.clients.forEach((client, ws) => { if (client.documentId === id) ws.close(1000, "Document access revoked"); });
+  }
+  disconnectUser(id: string, userId: string) {
+    this.clients.forEach((client, ws) => {
+      if (client.documentId === id && client.userId === userId)
+        ws.close(1008, "Document access changed");
+    });
+  }
+  disconnectGuests(id: string) {
+    this.clients.forEach((client, ws) => {
+      if (client.documentId === id && client.userId.startsWith("guest:"))
+        ws.close(1008, "Share link revoked");
+    });
   }
   async flush() {
     await Promise.all([...this.clients.values()].map((client) => client.flight));

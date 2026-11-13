@@ -3,6 +3,7 @@ import type { ShareToken, ShareTokenOptions } from "@shared/types";
 type ShareTokenRequestOptions = ShareTokenOptions & { workspaceId?: string };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+export type SharedMember = { userId: string; role: "viewer" | "editor" };
 
 const parseJson = async <T>(response: Response): Promise<T> => {
   const data = (await response.json()) as T;
@@ -94,4 +95,24 @@ export const revokeShareToken = async (
     { method: "DELETE", credentials: "include" }
   );
   return parseJson<{ token: string; revoked: boolean }>(response);
+};
+
+const memberUrl = (documentId: string, workspaceId?: string, userId?: string) =>
+  `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/members${userId ? `/${encodeURIComponent(userId)}` : ""}?workspaceId=${encodeURIComponent(resolveWorkspaceId(workspaceId))}`;
+
+export const getDocumentMembers = async (documentId: string, workspaceId?: string) => {
+  const response = await fetch(memberUrl(documentId, workspaceId), { credentials: "include" });
+  return (await parseJson<{ members: SharedMember[] }>(response)).members;
+};
+
+export const updateDocumentMember = async (documentId: string, userId: string, role: SharedMember["role"], workspaceId?: string) => {
+  const response = await fetch(memberUrl(documentId, workspaceId, userId), {
+    method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role })
+  });
+  return (await parseJson<{ member: SharedMember }>(response)).member;
+};
+
+export const removeDocumentMember = async (documentId: string, userId: string, workspaceId?: string) => {
+  const response = await fetch(memberUrl(documentId, workspaceId, userId), { method: "DELETE", credentials: "include" });
+  return parseJson<{ removed: boolean; userId: string }>(response);
 };

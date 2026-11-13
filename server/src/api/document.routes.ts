@@ -35,10 +35,10 @@ import {
   resolveSuggestionsByAuthor
 } from "../services/suggestion.service.js";
 import { canEditDocument, getDocumentRole } from "../services/permission.service.js";
+import { listDocumentMembers, removeDocumentMember, updateDocumentMemberRole } from "../services/documentMember.service.js";
 import {
   generateShareToken,
   getShareTokenByToken,
-  incrementTokenUsage,
   listActiveShareTokens,
   revokeShareToken,
   validateShareToken
@@ -55,6 +55,20 @@ const DEFAULT_DOCUMENT_CONTENT = {
 };
 
 const SHARE_PERMISSION_LEVELS = new Set(["viewer", "editor", "owner"]);
+const isValidDocumentJson = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value) || (value as { type?: unknown }).type !== "doc") return false;
+  let count = 0;
+  const visit = (node: unknown, depth: number): boolean => {
+    if (++count > 20_000 || depth > 32 || !node || typeof node !== "object") return false;
+    if (Array.isArray(node)) return node.length <= 10_000 && node.every((child) => visit(child, depth + 1));
+    return Object.entries(node).every(([key, child]) => key.length <= 128 &&
+      (typeof child === "string" ? child.length <= 200_000 : child === null || typeof child === "boolean" ||
+        (typeof child === "number" && Number.isFinite(child)) || visit(child, depth + 1)));
+  };
+  try { return visit(value, 0) && Buffer.byteLength(JSON.stringify(value), "utf8") <= 512_000; }
+  catch { return false; }
+};
+const validTitle = (title: unknown) => typeof title === "string" && title.trim().length > 0 && title.trim().length <= 200;
 
 const requireUserId = (req: AuthenticatedRequest, res: Response): string | null => {
   const userId = req.user?.id;
@@ -86,13 +100,9 @@ documentRoutes.get("/share/:token", async (req, res, next) => {
       return;
     }
 
-    const updatedToken = await incrementTokenUsage(token);
-    if (!updatedToken) {
-      res.status(410).json({ message: "Share token is no longer valid" });
-      return;
-    }
-
-    res.json({ shareToken: updatedToken });
+    // Looking up a link is not a redemption. Usage is charged when a new
+    // authenticated member is actually added by autoJoinDocumentViaShare.
+    res.json({ shareToken: validation.token });
   } catch (error) {
     next(error);
   }
@@ -206,7 +216,7 @@ documentRoutes.get("/:id/share-tokens", async (req: AuthenticatedRequest, res, n
       return;
     }
     const role = await getDocumentRole(userId, req.params.id, workspaceId);
-    if (!canEditDocument(role)) {
+    if (role !== "owner") {
       res.status(403).json({ message: "Access denied" });
       return;
     }
@@ -243,7 +253,7 @@ documentRoutes.delete("/share/:token", async (req: AuthenticatedRequest, res, ne
       return;
     }
     const role = await getDocumentRole(userId, shareToken.documentId, workspaceId);
-    if (!canEditDocument(role)) {
+    if (role !== "owner") {
       res.status(403).json({ message: "Access denied" });
       return;
     }
@@ -254,10 +264,61 @@ documentRoutes.delete("/share/:token", async (req: AuthenticatedRequest, res, ne
       return;
     }
 
+    getYjsManager().disconnectGuests(shareToken.documentId);
+
     res.json({ token, revoked: true });
   } catch (error) {
     next(error);
   }
+});
+
+documentRoutes.get("/:id/members", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    if (!workspaceId) { res.status(400).json({ message: "workspaceId is required" }); return; }
+    if (await getDocumentRole(userId, req.params.id, workspaceId) !== "owner") {
+      res.status(403).json({ message: "Access denied" }); return;
+    }
+    res.json({ members: await listDocumentMembers(req.params.id, workspaceId) });
+  } catch (error) { next(error); }
+});
+
+documentRoutes.patch("/:id/members/:memberId", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    if (!workspaceId) { res.status(400).json({ message: "workspaceId is required" }); return; }
+    if (await getDocumentRole(userId, req.params.id, workspaceId) !== "owner") {
+      res.status(403).json({ message: "Access denied" }); return;
+    }
+    const role = req.body?.role;
+    if (role !== "viewer" && role !== "editor") {
+      res.status(400).json({ message: "role must be viewer or editor" }); return;
+    }
+    const member = await updateDocumentMemberRole(req.params.id, workspaceId, req.params.memberId, role);
+    if (!member) { res.status(404).json({ message: "Collaborator not found" }); return; }
+    getYjsManager().disconnectUser(req.params.id, member.userId);
+    res.json({ member });
+  } catch (error) { next(error); }
+});
+
+documentRoutes.delete("/:id/members/:memberId", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    if (!workspaceId) { res.status(400).json({ message: "workspaceId is required" }); return; }
+    if (await getDocumentRole(userId, req.params.id, workspaceId) !== "owner") {
+      res.status(403).json({ message: "Access denied" }); return;
+    }
+    const removed = await removeDocumentMember(req.params.id, workspaceId, req.params.memberId);
+    if (!removed) { res.status(404).json({ message: "Collaborator not found" }); return; }
+    getYjsManager().disconnectUser(req.params.id, req.params.memberId);
+    res.json({ removed: true, userId: req.params.memberId });
+  } catch (error) { next(error); }
 });
 
 documentRoutes.post("/", async (req: AuthenticatedRequest, res, next) => {
@@ -268,6 +329,8 @@ documentRoutes.post("/", async (req: AuthenticatedRequest, res, next) => {
       content?: Record<string, unknown>;
       workspaceId?: string;
     };
+    if (title !== undefined && !validTitle(title)) { res.status(400).json({ message: "title must contain 1 to 200 characters" }); return; }
+    if (content !== undefined && !isValidDocumentJson(content)) { res.status(400).json({ message: "content must be a valid bounded document JSON object" }); return; }
 
     if (!workspaceId) {
       res.status(400).json({ message: "workspaceId is required" });
@@ -587,6 +650,8 @@ documentRoutes.patch("/:id", async (req: AuthenticatedRequest, res, next) => {
       title?: string;
       content?: Record<string, unknown>;
     };
+    if (title !== undefined && !validTitle(title)) { res.status(400).json({ message: "title must contain 1 to 200 characters" }); return; }
+    if (content !== undefined && !isValidDocumentJson(content)) { res.status(400).json({ message: "content must be a valid bounded document JSON object" }); return; }
 
     const userId = req.user?.id ?? "";
     const shareToken = req.shareToken;

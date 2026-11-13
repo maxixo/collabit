@@ -182,7 +182,7 @@ export const autoJoinDocumentViaShare = async (
   documentId: string,
   userId: string,
   shareToken: string,
-  permissionLevel: string
+  _permissionLevel: string
 ): Promise<boolean> => {
   if (!documentId || !userId || !shareToken) {
     return false;
@@ -193,63 +193,43 @@ export const autoJoinDocumentViaShare = async (
     return false;
   }
 
-  const validation = await validateShareToken(shareToken);
-  if (!validation.valid || validation.token.documentId !== documentId) {
-    return false;
-  }
+  const client = await db.connect();
+  let workspaceId = "";
+  try {
+    await client.query("BEGIN");
+    const document = await client.query(
+      `SELECT d.owner_id, ${schema.hasWorkspaceId ? "d.workspace_id" : "NULL AS workspace_id"}
+       FROM documents d WHERE d.id=$1 AND d.deleted_at IS NULL FOR UPDATE`, [documentId]);
+    if (!document.rows[0]) { await client.query("ROLLBACK"); return false; }
+    const row = document.rows[0] as { owner_id: string; workspace_id?: string };
+    workspaceId = row.workspace_id ?? "";
+    if (row.owner_id === userId) { await client.query("COMMIT"); return true; }
 
-  const { params, addParam } = createParamBuilder();
-  const idParam = addParam(documentId);
-  const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : "NULL AS workspace_id";
+    const existing = await client.query(
+      "SELECT role FROM document_members WHERE document_id=$1 AND user_id=$2 FOR UPDATE", [documentId, userId]);
+    if (existing.rows[0]) {
+      await client.query("COMMIT");
+      if (workspaceId) await joinWorkspaceViaShare(workspaceId, userId);
+      return true;
+    }
 
-  const { rows } = await db.query(
-    `
-      SELECT d.owner_id, ${workspaceSelect}
-      FROM documents d
-      WHERE d.id = ${idParam}
-      LIMIT 1
-    `,
-    params
-  );
+    const redeemed = await client.query(
+      `UPDATE share_tokens SET use_count=use_count+1
+       WHERE token=$1 AND document_id=$2
+         AND (expiration_date IS NULL OR expiration_date>NOW())
+         AND (max_uses IS NULL OR use_count<max_uses)
+       RETURNING permission_level`, [shareToken, documentId]);
+    if (!redeemed.rows[0]) { await client.query("ROLLBACK"); return false; }
+    const grantedPermission = String(redeemed.rows[0].permission_level);
+    const role = normalizeSharePermission(grantedPermission);
+    await client.query("INSERT INTO document_members(document_id,user_id,role) VALUES($1,$2,$3)", [documentId, userId, role]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally { client.release(); }
 
-  if (rows.length === 0) {
-    return false;
-  }
-
-  const row = rows[0] as { owner_id?: string; workspace_id?: string; workspaceId?: string };
-  const ownerId = typeof row.owner_id === "string" ? row.owner_id : "";
-  const workspaceId = schema.hasWorkspaceId
-    ? typeof row.workspace_id === "string"
-      ? row.workspace_id
-      : typeof row.workspaceId === "string"
-        ? row.workspaceId
-        : ""
-    : "";
-
-  if (ownerId && ownerId === userId) {
-    return true;
-  }
-
-  const resolvedPermission =
-    permissionLevel === "viewer" || permissionLevel === "editor" || permissionLevel === "owner"
-      ? permissionLevel
-      : validation.token.permissionLevel;
-
-  const role = normalizeSharePermission(resolvedPermission);
-
-  await db.query(
-    `
-      INSERT INTO document_members (document_id, user_id, role)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (document_id, user_id) DO NOTHING
-    `,
-    [documentId, userId, role]
-  );
-
-  if (workspaceId) {
-    await joinWorkspaceViaShare(workspaceId, userId);
-  }
-
+  if (workspaceId) await joinWorkspaceViaShare(workspaceId, userId);
   return true;
 };
 
