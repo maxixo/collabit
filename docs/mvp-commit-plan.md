@@ -30,7 +30,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | [x] | C07 | `fix(collaboration): persist rooms and synchronize document state` | Collaboration |
 | [x] | C08 | `fix(server): drain sockets and flush pending state on shutdown` | Collaboration |
 | [x] | C09 | `fix(sharing): enforce grant lifecycle and collaborator removal` | Access control |
-| [ ] | C10 | `fix(security): validate API payloads and constrain socket traffic` | Access control |
+| [x] | C10 | `fix(security): validate API payloads and constrain socket traffic` | Access control |
 | [ ] | C11 | `fix(offline): build the service worker and restore cached sessions` | Essential UX |
 | [ ] | C12 | `feat(auth): implement password recovery and provider availability` | Essential UX |
 | [ ] | C13 | `fix(ui): complete recovery screens and mobile workflows` | Essential UX |
@@ -198,6 +198,8 @@ This is one coherent cross-stack change: do not enable persistent room hydration
 Add entries here as implementation commits land. The planning document itself does not demonstrate that the MVP is finished.
 
 C09 verification: share-link inspection no longer increments usage; a row-locked transaction increments usage only when a new member is inserted, so reconnects do not consume another redemption and `maxUses` cannot be raced. Owner-only collaborator endpoints list, change, and remove members; access changes close that member's sockets. Link revocation closes guest sockets while preserving existing membership. Targeted `test:stack -- --grep "share validation" --reuse-server-build` passed with the disposable PostgreSQL database.
+
+C10 verification: bounded document titles/JSON and IDs receive controlled 400 responses; API body size and per-IP document API request rates are limited; socket handshakes enforce the configured frontend origin allowlist, frames are size-capped, client connections are bounded per document, and heartbeat cleanup reaps stale sockets. Targeted production-stack browser checks passed for invalid content and foreign-origin socket rejection. Full workspace lint, typecheck, unit tests, and production build passed.
 
 | Plan ID | Commit hash | Commands/scenarios checked | Outcome / remaining limitation |
 | --- | --- | --- | --- |

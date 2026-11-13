@@ -13,6 +13,7 @@ import { isDraining } from "./serverState.js";
 
 export const createApp = () => {
   const app = express();
+  const documentWindows = new Map<string, { start: number; count: number }>();
   const allowAnyOrigin = !env.isProduction && env.corsOrigins.length === 0;
 
   app.disable("x-powered-by");
@@ -44,6 +45,27 @@ export const createApp = () => {
     if (isDraining() && (req.path === "/ready" || req.path.startsWith("/api/"))) {
       res.status(503).json({ status: "draining" });
       return;
+    }
+    next();
+  });
+
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api/documents")) { next(); return; }
+    const now = Date.now();
+    const key = req.ip || req.socket.remoteAddress || "unknown";
+    let window = documentWindows.get(key);
+    if (!window || now - window.start >= 60_000) {
+      window = { start: now, count: 0 };
+      documentWindows.set(key, window);
+    }
+    window.count++;
+    if (window.count > 180) {
+      res.setHeader("Retry-After", "60");
+      res.status(429).json({ message: "Document API rate limit exceeded" });
+      return;
+    }
+    if (documentWindows.size > 10_000) {
+      for (const [ip, value] of documentWindows) if (now - value.start >= 60_000) documentWindows.delete(ip);
     }
     next();
   });

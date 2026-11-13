@@ -56,6 +56,7 @@ const headersTimeoutMs = Math.max(
   requestTimeoutMs + 1_000
 );
 const shutdownTimeoutMs = parsePositiveInt(process.env.SHUTDOWN_TIMEOUT_MS, 10_000);
+const websocketMaxPayloadBytes = parsePositiveInt(process.env.WS_MAX_PAYLOAD_BYTES, 1_048_576);
 
 export const env = {
   nodeEnv,
@@ -72,7 +73,8 @@ export const env = {
   trustProxy: parseBoolean(process.env.TRUST_PROXY, false),
   requestTimeoutMs,
   headersTimeoutMs,
-  shutdownTimeoutMs
+  shutdownTimeoutMs,
+  websocketMaxPayloadBytes
 };
 
 if (env.isProduction) {

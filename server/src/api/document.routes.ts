@@ -7,6 +7,7 @@ import type { ShareTokenOptions } from "@shared/types.js";
 import type { DocumentModel } from "../models/document.model.js";
 import { authMiddleware, type AuthenticatedRequest } from "../middlewares/auth.middleware.js";
 import { logger } from "../utils/logger.js";
+import { env } from "../config/env.js";
 import {
   autoJoinDocumentViaShare,
   createDocument,
@@ -48,6 +49,14 @@ import {
 } from "../services/documentVersion.service.js";
 
 export const documentRoutes = Router();
+documentRoutes.param("id", (req, res, next, value) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) { res.status(400).json({ message: "Invalid document ID" }); return; }
+  next();
+});
+documentRoutes.param("memberId", (_req, res, next, value) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) { res.status(400).json({ message: "Invalid member ID" }); return; }
+  next();
+});
 
 const DEFAULT_DOCUMENT_CONTENT = {
   type: "doc",
@@ -632,7 +641,7 @@ documentRoutes.patch("/:id/sync", async (req: AuthenticatedRequest, res, next) =
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : access.workspaceId;
     if (workspaceId !== access.workspaceId) { res.status(404).json({ message: "Document not found" }); return; }
     const update = req.body.yjsUpdate;
-    if (!Array.isArray(update) || !update.length || !update.every((value: unknown) => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 255)) {
+    if (!Array.isArray(update) || !update.length || update.length > env.websocketMaxPayloadBytes || !update.every((value: unknown) => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 255)) {
       res.status(400).json({ message: "yjsUpdate must be an array of bytes" }); return;
     }
     await mergeDocumentUpdate(req.params.id, new Uint8Array(update), undefined, true);

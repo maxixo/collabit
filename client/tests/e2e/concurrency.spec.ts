@@ -70,3 +70,27 @@ test("share validation is free, redemption is once per joined user, and owner ca
     await owner.context.close();
   }
 });
+
+test("document endpoints reject malformed and oversized fields with controlled responses", async ({ request }) => {
+  await signUpViaApi(request, makeUser("input-limits"));
+  const doc = await createDocumentViaApi(request, { title: "Validation" });
+  const url = `${API_BASE_URL}/api/documents/${doc.id}?workspaceId=default`;
+  expect((await request.patch(url, { data: { title: " " } })).status()).toBe(400);
+  expect((await request.patch(url, { data: { title: "x".repeat(201) } })).status()).toBe(400);
+  expect((await request.patch(url, { data: { content: { type: "image", src: "x" } } })).status()).toBe(400);
+});
+
+test("WebSocket upgrade rejects an origin outside the configured frontend allowlist", async ({ browser }) => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(API_BASE_URL);
+    const result = await page.evaluate((api) => new Promise<string>((resolve) => {
+      const wsUrl = api.replace(/^http/, "ws") + "/ws/00000000-0000-4000-8000-000000000001";
+      const socket = new WebSocket(wsUrl);
+      const timer = window.setTimeout(() => { socket.close(); resolve("timeout"); }, 3000);
+      socket.onopen = () => { clearTimeout(timer); socket.close(); resolve("open"); };
+      socket.onerror = () => { clearTimeout(timer); resolve("rejected"); };
+    }), API_BASE_URL);
+    expect(result).toBe("rejected");
+  } finally { await page.close(); }
+});

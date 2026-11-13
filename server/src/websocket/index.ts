@@ -7,6 +7,7 @@ import { canEditDocument } from "../services/permission.service.js";
 import { logger } from "../utils/logger.js";
 import { getSessionUser } from "../middlewares/auth.middleware.js";
 import { isDraining } from "../serverState.js";
+import { env } from "../config/env.js";
 
 const yjsServer = createYjsServer();
 const authorizations = new Set<Promise<void>>();
@@ -120,8 +121,31 @@ const authorizeConnection = async (
 };
 
 export const initWebSocketServer = (server: Server) => {
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({
+    server,
+    maxPayload: env.websocketMaxPayloadBytes,
+    verifyClient: ({ origin }, done) => {
+      const allowed = !origin || env.corsOrigins.length === 0 || env.corsOrigins.includes(origin);
+      done(allowed, 403, "Origin not allowed");
+    }
+  });
   websocketServer = wss;
+
+  const heartbeat = setInterval(() => {
+    wss.clients.forEach((socket) => {
+      const tracked = socket as typeof socket & { isAlive?: boolean };
+      if (tracked.isAlive === false) { socket.terminate(); return; }
+      tracked.isAlive = false;
+      socket.ping();
+    });
+  }, 30_000);
+  heartbeat.unref();
+  wss.on("connection", (socket) => {
+    const tracked = socket as typeof socket & { isAlive?: boolean };
+    tracked.isAlive = true;
+    socket.on("pong", () => { tracked.isAlive = true; });
+  });
+  wss.on("close", () => clearInterval(heartbeat));
 
   wss.on("connection", (socket, request) => {
     if (isDraining()) { socket.close(1012, "Server is shutting down"); return; }
