@@ -10,6 +10,7 @@ export interface DocumentSummary {
 }
 
 export interface DocumentModel extends DocumentSummary {
+  revision: number;
   content: TipTapContent;
 }
 
@@ -90,6 +91,7 @@ export const mapDocumentRow = (_row: unknown): DocumentModel => {
   const row = typeof _row === "object" && _row !== null ? (_row as Record<string, unknown>) : {};
   return {
     ...mapDocumentSummaryRow(row),
+    revision: Number(row.revision ?? 0),
     content: parseContent(row.content)
   };
 };

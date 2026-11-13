@@ -9,6 +9,7 @@ import { workspaceRoutes } from "./api/workspace.routes.js";
 import { db } from "./config/db.js";
 import { env } from "./config/env.js";
 import { errorMiddleware } from "./middlewares/error.middleware.js";
+import { isDraining } from "./serverState.js";
 
 export const createApp = () => {
   const app = express();
@@ -39,6 +40,14 @@ export const createApp = () => {
   app.use(express.json({ limit: env.apiBodyLimit }));
   app.use(express.urlencoded({ extended: false, limit: env.apiBodyLimit }));
 
+  app.use((req, res, next) => {
+    if (isDraining() && (req.path === "/ready" || req.path.startsWith("/api/"))) {
+      res.status(503).json({ status: "draining" });
+      return;
+    }
+    next();
+  });
+
   app.get("/", (_req, res) => {
     res.json({
       service: "collab-api",
@@ -52,6 +61,7 @@ export const createApp = () => {
   });
 
   app.get("/ready", async (_req, res) => {
+    if (isDraining()) { res.status(503).json({ status: "draining" }); return; }
     try {
       await db.query("SELECT 1");
       res.json({ status: "ready" });

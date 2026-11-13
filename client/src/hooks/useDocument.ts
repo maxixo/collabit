@@ -144,13 +144,14 @@ export const useDocument = (documentId?: string, workspaceId?: string, options?:
     return () => { active = false; unsubscribe(); };
   }, [account, documentId, showDraftStatus]);
 
-  const updateDocumentState = useCallback((next: DocumentState) => {
+  const updateDocumentState = useCallback((next: DocumentState, options?: { yjsUpdate?: number[] }) => {
     if (!isCurrentAccount(account)) return;
     setDocument(next); setSaveStatus(navigator.onLine ? "queued" : "offline");
     writes.current++;
     const pending = enqueueDocumentUpdate({
       documentId: next.id, workspaceId: next.workspaceId || workspaceId || "default", title: next.title,
-      content: next.content, updatedAtClient: next.updatedAt, baseUpdatedAt: synced.current?.updatedAt ?? null, shareToken
+      content: next.content, updatedAtClient: next.updatedAt, baseUpdatedAt: synced.current?.updatedAt ?? null,
+      baseRevision: synced.current?.revision ?? next.revision, shareToken, yjsUpdate: options?.yjsUpdate
     }, account);
     latestWrite.current = pending;
     void cacheDocument(next, account).catch(() => {});
@@ -184,9 +185,17 @@ export const useDocument = (documentId?: string, workspaceId?: string, options?:
     setConflictState(null); setSaveError(null); setSaveStatus("idle");
   }, [account, documentId, conflictState, debouncedSync]);
   const reloadDocument = useCallback(() => setReloadNonce((nonce) => nonce + 1), []);
+  const observeServerDocument = useCallback((server: DocumentDetail) => {
+    if (server.id !== documentId || !isCurrentAccount(account)) return;
+    const previous = synced.current;
+    synced.current = normalize(server);
+    setDocument((current) => current?.id === server.id
+      ? { ...current, revision: server.revision,
+          title: current.title !== previous?.title ? current.title : server.title, updatedAt: server.updatedAt } : current);
+  }, [account, documentId]);
   return {
     document, accessRole, updateDocument: updateDocumentState, setLocalDocument, loading, error,
     saveStatus, saveError, conflictState, discardLocalDraft, clearConflict: discardLocalDraft,
-    reloadDocument, hydrationVersion
+    reloadDocument, hydrationVersion, observeServerDocument
   };
 };

@@ -3,6 +3,8 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor as TipTapEditor, JSONContent } from "@tiptap/core";
 import type { DocumentSuggestion, SuggestionMetadata } from "@shared/types";
 import { ySyncPluginKey } from "y-prosemirror";
+import * as Y from "yjs";
+import type { DocumentDetail } from "../services/document.service";
 import { createEditorExtensions } from "./editorConfig";
 import { Toolbar } from "./Toolbar";
 import { destroyYjsProvider, getYjsProvider, type YjsProvider } from "../collaboration/yjsProvider";
@@ -117,9 +119,10 @@ type EditorSurfaceProps = {
   contentVersion?: number;
   editable: boolean;
   hideToolbar?: boolean;
-  onChange: (content: JSONContent) => void;
+  onChange: (content: JSONContent, yjsUpdate?: number[]) => void;
+  onDurableDocument?: (document: DocumentDetail) => void;
   docTitle: string;
-  onTitleChange: (title: string) => void;
+  onTitleChange: (title: string, yjsUpdate?: number[]) => void;
   onStatsChange?: (stats: EditorStats) => void;
   onYjsUpdate?: (content: JSONContent) => void;
   onCursorUpdate?: (position: number, range?: { from: number; to: number }) => void;
@@ -149,6 +152,7 @@ export const EditorSurface = ({
   editable,
   hideToolbar = false,
   onChange,
+  onDurableDocument,
   onTitleChange,
   onStatsChange,
   onYjsUpdate,
@@ -226,6 +230,19 @@ export const EditorSurface = ({
   const onChangeRef = useRef(onChange);
   const lastHydratedKey = useRef<string | null>(null);
   const hydratedEditor = useRef<TipTapEditor | null>(null);
+  const [roomReady, setRoomReady] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const durableCallback = useRef(onDurableDocument);
+  durableCallback.current = onDurableDocument;
+  useEffect(() => {
+    setRoomReady(provider?.isReady() ?? false);
+    setRoomError(null);
+    return provider?.subscribe((state) => {
+      setRoomReady(state.ready);
+      if (state.error) setRoomError(state.error); else if (state.document) setRoomError(null);
+      if (state.document) durableCallback.current?.(state.document);
+    });
+  }, [provider]);
 
   const debouncedCursorUpdate = useMemo(
     () =>
@@ -439,7 +456,9 @@ export const EditorSurface = ({
         // Editor creation/reconfiguration must never enqueue an empty initialization snapshot.
         if (hydratedEditor.current !== editorInstance || loading || error || !transaction.docChanged) return;
         const nextContent = editorInstance.getJSON() as JSONContent;
-        onChangeRef.current(nextContent);
+        const origin = transaction.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined;
+        if (!origin?.isChangeOrigin)
+          onChangeRef.current(nextContent, provider ? Array.from(Y.encodeStateAsUpdate(provider.doc)) : undefined);
         updateStats(editorInstance);
 
         const syncMeta = transaction.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined;
@@ -563,6 +582,13 @@ export const EditorSurface = ({
     if (loading || error) {
       return;
     }
+    if (collaborationEnabled) {
+      if (!provider || !roomReady) return;
+      hydratedEditor.current = safeEditor;
+      lastHydratedKey.current = hydrationKey;
+      updateStats(safeEditor);
+      return;
+    }
     if (lastHydratedKey.current === hydrationKey) {
       return;
     }
@@ -589,7 +615,7 @@ export const EditorSurface = ({
     safeEditor.commands.focus("end");
     lastHydratedKey.current = hydrationKey;
     updateStats(safeEditor);
-  }, [safeEditor, content, documentId, contentVersion, loading, error, updateStats, clearSuggestionHideTimeout]);
+  }, [safeEditor, content, documentId, contentVersion, loading, error, updateStats, clearSuggestionHideTimeout, collaborationEnabled, provider, roomReady]);
 
   useEffect(() => {
     if (!safeEditor) {
@@ -600,9 +626,9 @@ export const EditorSurface = ({
 
   useEffect(() => {
     if (safeEditor) {
-      safeEditor.setEditable(editable, false);
+      safeEditor.setEditable(editable && (!collaborationEnabled || roomReady), false);
     }
-  }, [safeEditor, editable]);
+  }, [safeEditor, editable, collaborationEnabled, roomReady]);
 
   useEffect(() => {
     if (!syncManager) {
@@ -843,6 +869,8 @@ export const EditorSurface = ({
         className="relative mx-auto my-12 min-h-[1000px] max-w-[800px] bg-white p-24 text-[#0d0e1b] dark:text-[#0d0e1b]"
         data-testid="editor-surface"
       >
+        {roomError && <p role="alert" className="mb-4 text-sm text-rose-700">{roomError}</p>}
+        {collaborationEnabled && !roomReady && <p role="status" className="mb-4 text-sm">Loading shared document…</p>}
         <article className="max-w-none">
           <div className="mb-8">
             <label className="sr-only" htmlFor="document-title">
@@ -854,10 +882,14 @@ export const EditorSurface = ({
               ref={titleInputRef}
               value={docTitle}
               placeholder="Untitled document"
-              readOnly={!editable}
-              aria-disabled={!editable}
+              readOnly={!editable || (collaborationEnabled && !roomReady)}
+              aria-disabled={!editable || (collaborationEnabled && !roomReady)}
               data-testid="editor-title-input"
-              onChange={(event) => onTitleChange(event.target.value)}
+              onChange={(event) => {
+                const title = event.target.value;
+                if (provider) provider.doc.getMap("metadata").set("title", title);
+                onTitleChange(title, provider ? Array.from(Y.encodeStateAsUpdate(provider.doc)) : undefined);
+              }}
               onKeyDown={handleTitleKeyDown}
             />
           </div>

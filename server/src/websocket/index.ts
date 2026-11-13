@@ -1,13 +1,16 @@
 import { randomUUID } from "crypto";
 import type { IncomingMessage, Server } from "http";
 import { WebSocketServer } from "ws";
-import { createYjsServer } from "../collaboration/yjsServer.js";
+import { createYjsServer, drainYjsServer } from "../collaboration/yjsServer.js";
 import { autoJoinDocumentViaShare, validateDocumentAccessWithShare } from "../services/document.service.js";
 import { canEditDocument } from "../services/permission.service.js";
 import { logger } from "../utils/logger.js";
 import { getSessionUser } from "../middlewares/auth.middleware.js";
+import { isDraining } from "../serverState.js";
 
 const yjsServer = createYjsServer();
+const authorizations = new Set<Promise<void>>();
+let websocketServer: WebSocketServer | undefined;
 
 type ParsedConnection = {
   documentId: string;
@@ -118,8 +121,11 @@ const authorizeConnection = async (
 
 export const initWebSocketServer = (server: Server) => {
   const wss = new WebSocketServer({ server });
+  websocketServer = wss;
 
-  wss.on("connection", async (socket, request) => {
+  wss.on("connection", (socket, request) => {
+    if (isDraining()) { socket.close(1012, "Server is shutting down"); return; }
+    const flight = (async () => {
     try {
       const parsed = parseConnection(request);
       if (!parsed) {
@@ -144,7 +150,7 @@ export const initWebSocketServer = (server: Server) => {
         );
       }
 
-      yjsServer.attach(socket, {
+      await yjsServer.attach(socket, {
         documentId: authorization.documentId,
         userId,
         canWrite: canEditDocument(authorization.access.role)
@@ -157,9 +163,22 @@ export const initWebSocketServer = (server: Server) => {
       logger.error(`[WebSocket] connection failed: ${error}`);
       socket.close(1011, "Internal Server Error");
     }
+    })();
+    authorizations.add(flight);
+    void flight.finally(() => authorizations.delete(flight));
   });
 
   logger.info("WebSocket server initialized");
 
   return wss;
+};
+
+export const drainWebSocketServer = async (timeoutMs: number) => {
+  websocketServer?.clients.forEach((socket) => { if (socket.readyState === socket.OPEN) socket.close(1001, "Server is shutting down"); });
+  await Promise.race([
+    Promise.all([...authorizations]).then(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
+  ]);
+  await drainYjsServer(timeoutMs);
+  if (websocketServer) await new Promise<void>((resolve) => websocketServer!.close(() => resolve()));
 };

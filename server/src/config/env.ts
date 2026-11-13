@@ -55,6 +55,7 @@ const headersTimeoutMs = Math.max(
   parsePositiveInt(process.env.HEADERS_TIMEOUT_MS, 35_000),
   requestTimeoutMs + 1_000
 );
+const shutdownTimeoutMs = parsePositiveInt(process.env.SHUTDOWN_TIMEOUT_MS, 10_000);
 
 export const env = {
   nodeEnv,
@@ -70,7 +71,8 @@ export const env = {
   apiBodyLimit: process.env.API_BODY_LIMIT?.trim() || "1mb",
   trustProxy: parseBoolean(process.env.TRUST_PROXY, false),
   requestTimeoutMs,
-  headersTimeoutMs
+  headersTimeoutMs,
+  shutdownTimeoutMs
 };
 
 if (env.isProduction) {

@@ -7,7 +7,7 @@ test('authentication and document lifecycle use the real API and database', asyn
   await signUpViaApi(request, user);
   const created = await createDocumentViaApi(request, { title: 'API fixture' });
   const url = `${API_BASE_URL}/api/documents/${created.id}?workspaceId=default`;
-  const update = await request.patch(url, { data: { title: 'Saved through API' } });
+  const update = await request.patch(url, { data: { title: 'Saved through API', expectedRevision: created.revision, mutationId: crypto.randomUUID() } });
   expect(update.ok(), await update.text()).toBeTruthy();
   expect((await (await request.get(url)).json()).document.title).toBe('Saved through API');
   expect((await request.patch(`${API_BASE_URL}/api/documents/${created.id}/trash?workspaceId=default`)).ok()).toBeTruthy();

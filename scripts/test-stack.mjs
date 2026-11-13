@@ -130,11 +130,15 @@ try {
   if (reuseServer) await fs.access(path.join(root, 'server/dist/server.js'));
   await run([process.env.npm_execpath, 'run', 'build', ...(reuseServer ? ['--workspace', 'client'] : [])], root, env, 'build');
   await run(['dist/migrate.js', 'run'], path.join(root, 'server'), env, 'migrate');
+  if (process.argv.includes('--with-migrations'))
+    await run([process.env.npm_execpath, 'run', 'test:migrations', '--workspace', 'server'], root,
+      { ...env, MIGRATION_TEST_DATABASE_URL: adminUrl }, 'migration-tests');
+  await run([process.env.npm_execpath, 'run', 'test:integration', '--workspace', 'server'], root, env, 'integration');
   const backend = launch(['dist/server.js'], path.join(root, 'server'), env, 'api');
   const frontend = launch([path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(appPort), '--strictPort'], path.join(root, 'client'), env, 'client');
   await Promise.all([ready(`${api}/ready`, backend), ready(app, frontend)]);
   console.info('Fresh database and application servers ready. Running browser/API checks...');
-  await run([process.env.npm_execpath, 'run', 'test:e2e', '--workspace', 'client', '--', ...process.argv.slice(2).filter((arg) => arg !== '--reuse-server-build')], root, env, 'playwright');
+  await run([process.env.npm_execpath, 'run', 'test:e2e', '--workspace', 'client', '--', ...process.argv.slice(2).filter((arg) => !['--reuse-server-build', '--with-migrations'].includes(arg))], root, env, 'playwright');
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

@@ -4,6 +4,7 @@ import type { DocumentVersion } from "../services/history.service";
 import { getDocumentHistory, restoreDocumentVersion } from "../services/history.service";
 
 interface HistoryModalProps {
+  revision?: number;
   isOpen: boolean;
   onClose: () => void;
   documentId: string;
@@ -15,6 +16,7 @@ interface HistoryModalProps {
 }
 
 export const HistoryModal = ({
+  revision,
   isOpen,
   onClose,
   documentId,
@@ -31,6 +33,7 @@ export const HistoryModal = ({
   const [selectedVersion, setSelectedVersion] = useState<DocumentVersion | null>(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
   const historyRequestIdRef = useRef(0);
+  const restoreMutation = useRef<{ key: string; id: string } | null>(null);
 
   useEffect(() => {
     historyRequestIdRef.current += 1;
@@ -90,11 +93,13 @@ export const HistoryModal = ({
     setError(null);
 
     try {
+      const key = JSON.stringify([restoreDocumentId, selectedVersion.versionNumber, revision]);
+      if (restoreMutation.current?.key !== key) restoreMutation.current = { key, id: crypto.randomUUID() };
       const result = await restoreDocumentVersion(
         restoreDocumentId,
         selectedVersion.versionNumber,
         workspaceId,
-        { shareToken: shareToken ?? undefined }
+        { shareToken: shareToken ?? undefined, expectedRevision: revision, mutationId: restoreMutation.current.id }
       );
       onRestore({
         documentId: restoreDocumentId,

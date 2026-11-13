@@ -1,6 +1,12 @@
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { WebsocketProvider as YWebsocketProvider } from "y-websocket";
+import { decoding } from "lib0";
+import { getMeta, setMeta } from "../offline/indexedDb";
+import { getOfflineAccount, isCurrentAccount } from "../offline/accountScope";
+import type { DocumentDetail } from "../services/document.service";
+
+type ProviderState = { ready: boolean; document?: DocumentDetail; error?: string };
 
 export interface YjsProvider {
   doc: Y.Doc;
@@ -9,6 +15,8 @@ export interface YjsProvider {
   disconnect: () => void;
   destroy: () => void;
   isConnected: () => boolean;
+  isReady: () => boolean;
+  subscribe: (handler: (state: ProviderState) => void) => () => void;
 }
 
 interface WebSocketYjsProviderOptions {
@@ -28,6 +36,21 @@ class WebSocketYjsProvider implements YjsProvider {
   private readonly userName?: string;
   private readonly userImage?: string;
   private refCount = 1;
+  private readonly account = getOfflineAccount();
+  private listeners = new Set<(state: ProviderState) => void>();
+  private ready = false;
+  private initializing = false;
+  private destroyed = false;
+  private cacheFlight: Promise<void> = Promise.resolve();
+  private notify(state: Partial<ProviderState> = {}) {
+    if (isCurrentAccount(this.account) && !this.destroyed)
+      this.listeners.forEach((handler) => handler({ ready: this.ready, ...state }));
+  }
+  isReady() { return this.ready; }
+  subscribe(handler: (state: ProviderState) => void) {
+    this.listeners.add(handler); handler({ ready: this.ready });
+    return () => { this.listeners.delete(handler); };
+  }
 
   constructor(documentId: string, options: WebSocketYjsProviderOptions = {}) {
     this.documentId = documentId;
@@ -39,12 +62,27 @@ class WebSocketYjsProvider implements YjsProvider {
     this.doc = new Y.Doc();
     this.doc.getXmlFragment("content");
     this.awareness = new Awareness(this.doc);
+    this.doc.on("update", () => {
+      if (this.destroyed || !isCurrentAccount(this.account)) return;
+      const state = Array.from(Y.encodeStateAsUpdate(this.doc));
+      this.cacheFlight = this.cacheFlight.catch(() => {}).then(() => setMeta("yjs:" + this.documentId, state, this.account));
+      void this.cacheFlight.catch(() => this.notify({ error: "Unable to cache collaboration state on this browser." }));
+    });
   }
 
   connect(): void {
-    if (this.provider) {
+    if (this.provider || this.initializing || this.destroyed) {
       return;
     }
+    this.initializing = true;
+    void this.initialize().catch(() => this.notify({ error: "Unable to initialize collaboration. Keep this page open to retain local work." }))
+      .finally(() => { this.initializing = false; });
+  }
+
+  private async initialize() {
+    const cached = await getMeta<number[]>("yjs:" + this.documentId, this.account);
+    if (this.destroyed || !isCurrentAccount(this.account)) return;
+    if (cached?.length) Y.applyUpdate(this.doc, new Uint8Array(cached));
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const serverUrl = (
@@ -63,6 +101,14 @@ class WebSocketYjsProvider implements YjsProvider {
       params,
       disableBc: true
     });
+    this.provider.messageHandlers[4] = (_encoder, decoder) => {
+      const event = JSON.parse(decoding.readVarString(decoder)) as { document?: DocumentDetail; error?: string };
+      this.notify(event);
+    };
+    this.provider.on("sync", (synced: boolean) => {
+      if (synced) { this.ready = true; this.notify(); }
+    });
+    this.provider.on("connection-close", () => this.notify());
 
     if (this.userId) {
       this.awareness.setLocalStateField("user", {
@@ -104,12 +150,14 @@ class WebSocketYjsProvider implements YjsProvider {
     }
 
     this.disconnect();
+    this.destroyed = true; this.listeners.clear();
     this.doc.destroy();
   }
 
   forceDestroy(): void {
     this.refCount = 0;
     this.disconnect();
+    this.destroyed = true; this.listeners.clear();
     this.doc.destroy();
   }
 

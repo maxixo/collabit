@@ -91,7 +91,8 @@ export const Editor = () => {
     conflictState,
     discardLocalDraft,
     hydrationVersion,
-    reloadDocument
+    reloadDocument,
+    observeServerDocument
   } = useDocument(id, workspaceId, { shareToken: shareToken ?? undefined });
   const activeDocument = id ? (document?.id === id ? document : null) : document;
   const documentRef = useRef(activeDocument);
@@ -126,7 +127,6 @@ export const Editor = () => {
   // History Modal State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
-  const [contentResetVersion, setContentResetVersion] = useState(0);
   
   // Display helpers - declare these early since they're used in conditional checks
   const hasShareTokenError = Boolean(shareValidationError);
@@ -326,7 +326,7 @@ export const Editor = () => {
     [indexDocument]
   );
 
-  const handleContentChange = useCallback((nextContent: JSONContent) => {
+  const handleContentChange = useCallback((nextContent: JSONContent, yjsUpdate?: number[]) => {
     const currentDocument = documentRef.current;
     if (!currentDocument) {
       return;
@@ -339,7 +339,7 @@ export const Editor = () => {
     };
 
     documentRef.current = nextDocument;
-    updateDocumentRef.current(nextDocument);
+    updateDocumentRef.current(nextDocument, { yjsUpdate });
   }, []);
 
   const handleYjsUpdate = useCallback(
@@ -354,6 +354,9 @@ export const Editor = () => {
         return;
       }
 
+      const next = { ...currentDocument, content: nextContent as Record<string, unknown> };
+      documentRef.current = next;
+      setLocalDocument(next);
       debouncedYjsIndexUpdate({
         id: documentId,
         title: currentDocument.title ?? "",
@@ -361,10 +364,10 @@ export const Editor = () => {
         content: nextContent
       });
     },
-    [debouncedYjsIndexUpdate, id, workspaceId]
+    [debouncedYjsIndexUpdate, id, workspaceId, setLocalDocument]
   );
 
-  const handleTitleChange = useCallback((nextTitle: string) => {
+  const handleTitleChange = useCallback((nextTitle: string, yjsUpdate?: number[]) => {
     const currentDocument = documentRef.current;
     if (!currentDocument) {
       return;
@@ -377,7 +380,7 @@ export const Editor = () => {
     };
 
     documentRef.current = nextDocument;
-    updateDocumentRef.current(nextDocument);
+    updateDocumentRef.current(nextDocument, { yjsUpdate });
     
     // Update in recent documents list
     if (currentDocument.id) {
@@ -631,6 +634,7 @@ export const Editor = () => {
     const currentDocument = documentRef.current;
     return {
       title: currentDocument?.title,
+      expectedRevision: currentDocument?.revision,
       content: (currentDocument?.content as Record<string, unknown>) ?? undefined
     };
   }, []);
@@ -646,13 +650,14 @@ export const Editor = () => {
         ...getVersionSaveSnapshot()
       })
         .then(() => {
+          reloadDocument();
           setHistoryRefreshToken((current) => current + 1);
         })
         .catch((error) => {
           console.error("Failed to save document version:", error);
         });
     }
-  }, [getVersionSaveSnapshot, hasPendingChanges, versionSaveDocument]);
+  }, [getVersionSaveSnapshot, hasPendingChanges, versionSaveDocument, reloadDocument]);
 
   // Handle save confirmation - apply pending changes and save
   const handleApplySave = useCallback(async () => {
@@ -662,11 +667,12 @@ export const Editor = () => {
         ...getVersionSaveSnapshot()
       });
       setHistoryRefreshToken((current) => current + 1);
+      reloadDocument();
       setShowSaveModal(false);
     } catch (error) {
       console.error("Failed to save document:", error);
     }
-  }, [getVersionSaveSnapshot, versionSaveDocument]);
+  }, [getVersionSaveSnapshot, versionSaveDocument, reloadDocument]);
 
   // Handle save without applying pending changes
   const handleSaveOnly = useCallback(async () => {
@@ -676,11 +682,12 @@ export const Editor = () => {
         ...getVersionSaveSnapshot()
       });
       setHistoryRefreshToken((current) => current + 1);
+      reloadDocument();
       setShowSaveModal(false);
     } catch (error) {
       console.error("Failed to save document:", error);
     }
-  }, [getVersionSaveSnapshot, versionSaveDocument]);
+  }, [getVersionSaveSnapshot, versionSaveDocument, reloadDocument]);
 
   const handleAcceptSelectedSuggestions = useCallback(
     async (userIds: string[]) => {
@@ -706,36 +713,9 @@ export const Editor = () => {
 
   // Handle history restore
   const handleHistoryRestore = useCallback(
-    ({ documentId: restoredDocumentId, content }: { documentId: string; content: JSONContent }) => {
-      const currentDocument = documentRef.current;
-      if (!currentDocument || currentDocument.id !== restoredDocumentId) {
-        return;
-      }
-
-      const nextDocument = {
-        ...currentDocument,
-        content: content as Record<string, unknown>,
-        updatedAt: new Date().toISOString()
-      };
-
-      documentRef.current = nextDocument;
-      updateDocumentRef.current(nextDocument);
-      setContentResetVersion((current) => current + 1);
-
-      if (currentDocument.id) {
-        dispatch(
-          actions.updateRecentDocument({
-            id: currentDocument.id,
-            title: currentDocument.title,
-            updatedAt: new Date().toISOString(),
-            ownerId: currentDocument.ownerId,
-            workspaceId: currentDocument.workspaceId || workspaceId,
-            isStarred: currentDocument.isStarred
-          })
-        );
-      }
-    },
-    [workspaceId, dispatch]
+    ({ documentId: restoredDocumentId }: { documentId: string; content: JSONContent }) => {
+      if (documentRef.current?.id === restoredDocumentId) reloadDocument();
+    }, [reloadDocument]
   );
 
   // Register debug commands on mount
@@ -1199,9 +1179,10 @@ export const Editor = () => {
               key={documentId || "no-doc"}
               documentId={documentId}
               content={editorContent}
-              contentVersion={contentResetVersion + hydrationVersion}
+              contentVersion={hydrationVersion}
               editable={isEditable}
               onChange={handleContentChange}
+              onDurableDocument={observeServerDocument}
               onTitleChange={handleTitleChange}
               onStatsChange={setEditorStats}
               onYjsUpdate={handleYjsUpdate}
@@ -1283,6 +1264,7 @@ export const Editor = () => {
       {/* History Modal */}
       {showHistoryModal && documentId && (
         <HistoryModal
+          revision={activeDocument?.revision}
           key={`${documentId}:${workspaceId}:${shareToken ?? ""}`}
           isOpen={showHistoryModal}
           onClose={() => setShowHistoryModal(false)}

@@ -1,321 +1,149 @@
 import { WebSocket } from "ws";
 import * as Y from "yjs";
-import * as syncProtocol from "y-protocols/sync";
-import * as awarenessProtocol from "y-protocols/awareness";
-import * as authProtocol from "y-protocols/auth";
+import * as sync from "y-protocols/sync";
+import * as awareness from "y-protocols/awareness";
+import * as auth from "y-protocols/auth";
 import { encoding, decoding } from "lib0";
 import { logger } from "../utils/logger.js";
+import {
+  withDocumentRoom, closeDocumentRoom, mergeDocumentUpdate, flushDocumentRooms,
+  disposeDocumentRooms, type DocumentRoom
+} from "./documentRooms.js";
 
-const messageSync = 0;
-const messageAwareness = 1;
-const messageAuth = 2;
-const messageQueryAwareness = 3;
-
-type ClientInfo = {
-  docId: string;
-  userId: string;
-  canWrite: boolean;
-  clientIds: Set<number>;
+type Client = { documentId: string; userId: string; canWrite: boolean; ids: Set<number>; room: DocumentRoom; flight: Promise<void> };
+type Options = { documentId: string; userId: string; canWrite: boolean };
+const send = (ws: WebSocket, writer: (encoder: encoding.Encoder) => void) => {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  const encoder = encoding.createEncoder(); writer(encoder); ws.send(encoding.toUint8Array(encoder));
 };
-
-type AttachOptions = {
-  documentId: string;
-  userId: string;
-  canWrite: boolean;
-};
+const payload = (raw: WebSocket.RawData) => new Uint8Array(Array.isArray(raw) ? Buffer.concat(raw) : raw instanceof ArrayBuffer ? raw : raw);
 
 class YjsDocumentManager {
-  private documents = new Map<string, Y.Doc>();
-  private awarenessStates = new Map<string, awarenessProtocol.Awareness>();
-  clients = new Map<WebSocket, ClientInfo>();
-
-  getDocument(documentId: string): Y.Doc {
-    if (!this.documents.has(documentId)) {
-      const doc = new Y.Doc();
-      doc.getXmlFragment("content");
-      doc.on("update", (update: Uint8Array, origin: unknown) => {
-        const originSocket = origin instanceof WebSocket ? origin : undefined;
-        this.broadcastUpdate(documentId, update, originSocket);
+  clients = new Map<WebSocket, Client>();
+  private bound = new WeakSet<Y.Doc>();
+  private unregistering = new Map<WebSocket, Promise<void>>();
+  private accepting = true;
+  getClientCount(id: string) { return [...this.clients.values()].filter((client) => client.documentId === id).length; }
+  private durable(ws: WebSocket, room: DocumentRoom) {
+    send(ws, (encoder) => { encoding.writeVarUint(encoder, 4); encoding.writeVarString(encoder, JSON.stringify({ document: room.document })); });
+  }
+  private bind(room: DocumentRoom, id: string) {
+    if (this.bound.has(room.doc)) return;
+    this.bound.add(room.doc);
+    room.doc.on("update", (update: Uint8Array, origin: unknown) => {
+      this.clients.forEach((client, ws) => {
+        if (client.documentId !== id) return;
+        if (ws !== origin) send(ws, (encoder) => { encoding.writeVarUint(encoder, 0); sync.writeUpdate(encoder, update); });
+        this.durable(ws, room);
       });
-
-      const awareness = new awarenessProtocol.Awareness(doc);
-      awareness.setLocalState(null);
-      awareness.on(
-        "update",
-        (
-          { added, updated, removed }: { added: Set<number>; updated: Set<number>; removed: Set<number> },
-          origin: unknown
-        ) => {
-          const changed = [...added, ...updated, ...removed];
-          if (changed.length === 0) {
-            return;
-          }
-
-          const update = awarenessProtocol.encodeAwarenessUpdate(awareness, changed);
-          const originSocket = origin instanceof WebSocket ? origin : undefined;
-          this.broadcastAwareness(documentId, update, originSocket);
-        }
-      );
-
-      this.documents.set(documentId, doc);
-      this.awarenessStates.set(documentId, awareness);
-      logger.info(`[YjsServer] initialized document ${documentId}`);
-    }
-
-    return this.documents.get(documentId)!;
-  }
-
-  getAwareness(documentId: string): awarenessProtocol.Awareness {
-    const awareness = this.awarenessStates.get(documentId);
-    if (awareness) {
-      return awareness;
-    }
-
-    this.getDocument(documentId);
-    return this.awarenessStates.get(documentId)!;
-  }
-
-  removeDocument(documentId: string): void {
-    const doc = this.documents.get(documentId);
-    if (!doc) {
-      return;
-    }
-
-    doc.destroy();
-    this.documents.delete(documentId);
-    this.awarenessStates.delete(documentId);
-    logger.info(`[YjsServer] removed document ${documentId}`);
-  }
-
-  registerClient(ws: WebSocket, documentId: string, userId: string, canWrite: boolean): void {
-    this.clients.set(ws, { docId: documentId, userId, canWrite, clientIds: new Set() });
-  }
-
-  unregisterClient(ws: WebSocket): void {
-    const client = this.clients.get(ws);
-    if (!client) {
-      return;
-    }
-
-    const awareness = this.awarenessStates.get(client.docId);
-    if (awareness && client.clientIds.size > 0) {
-      awarenessProtocol.removeAwarenessStates(awareness, Array.from(client.clientIds), ws);
-    }
-
-    if (this.getClientCount(client.docId) === 1) {
-      this.removeDocument(client.docId);
-    }
-
-    this.clients.delete(ws);
-  }
-
-  trackAwareness(ws: WebSocket, update: Uint8Array): void {
-    const client = this.clients.get(ws);
-    if (!client) {
-      return;
-    }
-
-    const decoder = decoding.createDecoder(update);
-    const updateCount = decoding.readVarUint(decoder);
-    for (let index = 0; index < updateCount; index += 1) {
-      const clientId = decoding.readVarUint(decoder);
-      client.clientIds.add(clientId);
-      decoding.readVarUint(decoder);
-      decoding.readVarString(decoder);
-    }
-  }
-
-  getClientCount(documentId: string): number {
-    let count = 0;
-    this.clients.forEach((client) => {
-      if (client.docId === documentId) {
-        count += 1;
-      }
     });
-    return count;
-  }
-
-  broadcastUpdate(documentId: string, update: Uint8Array, excludeSocket?: WebSocket): void {
-    const encoder = encoding.createEncoder();
-    encoding.writeVarUint(encoder, messageSync);
-    syncProtocol.writeUpdate(encoder, update);
-    const payload = encoding.toUint8Array(encoder);
-
-    this.clients.forEach((client, ws) => {
-      if (client.docId === documentId && ws !== excludeSocket && ws.readyState === WebSocket.OPEN) {
-        ws.send(payload);
-      }
+    room.awareness.on("update", ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
+      const update = awareness.encodeAwarenessUpdate(room.awareness, [...added, ...updated, ...removed]);
+      this.clients.forEach((client, ws) => {
+        if (client.documentId === id && ws !== origin) send(ws, (encoder) => {
+          encoding.writeVarUint(encoder, 1); encoding.writeVarUint8Array(encoder, update);
+        });
+      });
     });
   }
-
-  broadcastAwareness(documentId: string, update: Uint8Array, excludeSocket?: WebSocket): void {
-    const encoder = encoding.createEncoder();
-    encoding.writeVarUint(encoder, messageAwareness);
-    encoding.writeVarUint8Array(encoder, update);
-    const payload = encoding.toUint8Array(encoder);
-
-    this.clients.forEach((client, ws) => {
-      if (client.docId === documentId && ws !== excludeSocket && ws.readyState === WebSocket.OPEN) {
-        ws.send(payload);
-      }
-    });
-  }
-}
-
-const yjsManager = new YjsDocumentManager();
-
-const sendPermissionDenied = (ws: WebSocket, reason: string) => {
-  const encoder = encoding.createEncoder();
-  encoding.writeVarUint(encoder, messageAuth);
-  authProtocol.writePermissionDenied(encoder, reason);
-  ws.send(encoding.toUint8Array(encoder));
-};
-
-const toPayload = (data: WebSocket.RawData): Uint8Array | null => {
-  if (typeof data === "string") {
-    return null;
-  }
-
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data);
-  }
-
-  if (Array.isArray(data)) {
-    return new Uint8Array(Buffer.concat(data));
-  }
-
-  return new Uint8Array(data);
-};
-
-const getSyncMessageType = (payload: Uint8Array) => {
-  const decoder = decoding.createDecoder(payload);
-  decoding.readVarUint(decoder);
-  return decoding.readVarUint(decoder);
-};
-
-export const createYjsServer = () => {
-  return {
-    attach: (ws: WebSocket, { documentId, userId, canWrite }: AttachOptions) => {
-      const doc = yjsManager.getDocument(documentId);
-      const awareness = yjsManager.getAwareness(documentId);
-      yjsManager.registerClient(ws, documentId, userId, canWrite);
-
-      logger.info(
-        `[YjsServer] attached user=${userId} document=${documentId} canWrite=${canWrite}`
-      );
-
-      const encoder = encoding.createEncoder();
-      encoding.writeVarUint(encoder, messageSync);
-      syncProtocol.writeSyncStep1(encoder, doc);
-      ws.send(encoding.toUint8Array(encoder));
-
-      if (awareness.getStates().size > 0) {
-        const awarenessEncoder = encoding.createEncoder();
-        encoding.writeVarUint(awarenessEncoder, messageAwareness);
-        encoding.writeVarUint8Array(
-          awarenessEncoder,
-          awarenessProtocol.encodeAwarenessUpdate(
-            awareness,
-            Array.from(awareness.getStates().keys())
-          )
-        );
-        ws.send(encoding.toUint8Array(awarenessEncoder));
-      }
-
-      ws.on("message", (data: WebSocket.RawData) => {
-        const payload = toPayload(data);
-        if (!payload) {
-          logger.warn(`[YjsServer] ignored non-binary message for document=${documentId}`);
-          return;
-        }
-
-        try {
-          const decoder = decoding.createDecoder(payload);
-          const messageType = decoding.readVarUint(decoder);
-
-          switch (messageType) {
-            case messageSync: {
-              const syncMessageType = getSyncMessageType(payload);
-              if (
-                !canWrite &&
-                (
-                  syncMessageType === syncProtocol.messageYjsSyncStep2 ||
-                  syncMessageType === syncProtocol.messageYjsUpdate
-                )
-              ) {
-                sendPermissionDenied(ws, "This collaboration session is read-only.");
+  async attach(ws: WebSocket, options: Options) {
+    if (!this.accepting) { ws.close(1012, "Server is shutting down"); return; }
+    await withDocumentRoom(options.documentId, (room) => {
+      if (!this.accepting || ws.readyState !== WebSocket.OPEN) return;
+      this.bind(room, options.documentId);
+      const client: Client = { ...options, ids: new Set(), room, flight: Promise.resolve() };
+      this.clients.set(ws, client);
+      // Send both steps: initial frames may precede asynchronous socket authentication.
+      send(ws, (encoder) => { encoding.writeVarUint(encoder, 0); sync.writeSyncStep2(encoder, room.doc); });
+      send(ws, (encoder) => { encoding.writeVarUint(encoder, 0); sync.writeSyncStep1(encoder, room.doc); });
+      this.durable(ws, room);
+      if (room.awareness.getStates().size) send(ws, (encoder) => {
+        encoding.writeVarUint(encoder, 1);
+        encoding.writeVarUint8Array(encoder, awareness.encodeAwarenessUpdate(room.awareness, [...room.awareness.getStates().keys()]));
+      });
+      ws.on("message", (raw) => {
+        client.flight = client.flight.then(async () => {
+          const decoder = decoding.createDecoder(payload(raw));
+          const type = decoding.readVarUint(decoder);
+          if (type === 0) {
+            const kind = decoding.readVarUint(decoder);
+            if (kind === sync.messageYjsSyncStep1) {
+              await withDocumentRoom(options.documentId, (active) => send(ws, (encoder) => {
+                encoding.writeVarUint(encoder, 0); sync.readSyncStep1(decoder, encoder, active.doc);
+              }));
+            } else if (kind === sync.messageYjsUpdate || kind === sync.messageYjsSyncStep2) {
+              if (!client.canWrite) {
+                send(ws, (encoder) => { encoding.writeVarUint(encoder, 2); auth.writePermissionDenied(encoder, "This collaboration session is read-only."); });
                 return;
               }
-
-              const response = encoding.createEncoder();
-              encoding.writeVarUint(response, messageSync);
-              syncProtocol.readSyncMessage(decoder, response, doc, ws, (error) => {
-                logger.error(`[YjsServer] sync error for document=${documentId}:`, error);
-              });
-
-              if (encoding.length(response) > 1) {
-                ws.send(encoding.toUint8Array(response));
-              }
-              break;
+              await mergeDocumentUpdate(options.documentId, decoding.readVarUint8Array(decoder), ws);
+              this.durable(ws, room);
             }
-
-            case messageAwareness: {
-              const awarenessUpdate = decoding.readVarUint8Array(decoder);
-              yjsManager.trackAwareness(ws, awarenessUpdate);
-              awarenessProtocol.applyAwarenessUpdate(awareness, awarenessUpdate, ws);
-              break;
+          } else if (type === 1) {
+            const update = decoding.readVarUint8Array(decoder);
+            const ids = decoding.createDecoder(update);
+            for (let count = decoding.readVarUint(ids); count > 0; count--) {
+              client.ids.add(decoding.readVarUint(ids)); decoding.readVarUint(ids); decoding.readVarString(ids);
             }
-
-            case messageQueryAwareness: {
-              const response = encoding.createEncoder();
-              encoding.writeVarUint(response, messageAwareness);
-              encoding.writeVarUint8Array(
-                response,
-                awarenessProtocol.encodeAwarenessUpdate(
-                  awareness,
-                  Array.from(awareness.getStates().keys())
-                )
-              );
-              ws.send(encoding.toUint8Array(response));
-              break;
-            }
-
-            case messageAuth: {
-              authProtocol.readAuthMessage(decoder, doc, (_doc, reason) => {
-                logger.warn(`[YjsServer] auth denied for document=${documentId}: ${reason}`);
-                sendPermissionDenied(ws, reason);
-              });
-              break;
-            }
-
-            default:
-              logger.warn(`[YjsServer] unknown message type=${messageType} document=${documentId}`);
-          }
-        } catch (error) {
-          logger.error(`[YjsServer] message handling failed for document=${documentId}:`, error);
-        }
+            awareness.applyAwarenessUpdate(room.awareness, update, ws);
+          } else if (type === 3) send(ws, (encoder) => {
+            encoding.writeVarUint(encoder, 1);
+            encoding.writeVarUint8Array(encoder, awareness.encodeAwarenessUpdate(room.awareness, [...room.awareness.getStates().keys()]));
+          });
+        }).catch((error) => {
+          logger.error("Collaboration update failed", { documentId: options.documentId, message: String(error) });
+          send(ws, (encoder) => { encoding.writeVarUint(encoder, 4); encoding.writeVarString(encoder, JSON.stringify({ error: "Unable to save collaboration changes. Local work is retained." })); });
+          ws.close(1011, "Unable to persist changes");
+        });
       });
-
-      ws.on("close", () => {
-        yjsManager.unregisterClient(ws);
-        logger.info(`[YjsServer] detached user=${userId} document=${documentId}`);
+      ws.once("close", () => {
+        void this.unregister(ws).catch((error) => logger.error("Collaboration socket cleanup failed", {
+          documentId: options.documentId, message: String(error)
+        }));
       });
-
-      ws.on("error", (error) => {
-        logger.error(`[YjsServer] socket error for document=${documentId}:`, error);
-      });
-    },
-
-    disconnectDocument: (documentId: string) => {
-      yjsManager.clients.forEach((client, ws) => {
-        if (client.docId === documentId) {
-          ws.close(1000, "Document access revoked");
-          yjsManager.unregisterClient(ws);
-        }
-      });
-      logger.info(`[YjsServer] disconnected clients for document=${documentId}`);
-    }
-  };
-};
-
-export const getYjsManager = () => yjsManager;
+      ws.on("error", (error) => logger.error("Collaboration socket error", { message: error.message }));
+    });
+    if (ws.readyState !== WebSocket.OPEN)
+      await closeDocumentRoom(options.documentId, () => this.getClientCount(options.documentId) > 0);
+  }
+  async unregister(ws: WebSocket) {
+    const pending = this.unregistering.get(ws);
+    if (pending) return pending;
+    const client = this.clients.get(ws);
+    if (!client) return;
+    const cleanup = (async () => {
+      await client.flight;
+      awareness.removeAwarenessStates(client.room.awareness, [...client.ids], ws);
+      this.clients.delete(ws);
+      await closeDocumentRoom(client.documentId, () => this.getClientCount(client.documentId) > 0);
+    })();
+    this.unregistering.set(ws, cleanup);
+    try { await cleanup; } finally { this.unregistering.delete(ws); }
+  }
+  disconnectDocument(id: string) {
+    this.clients.forEach((client, ws) => { if (client.documentId === id) ws.close(1000, "Document access revoked"); });
+  }
+  async flush() {
+    await Promise.all([...this.clients.values()].map((client) => client.flight));
+    await flushDocumentRooms();
+  }
+  async dispose() { await this.flush(); await disposeDocumentRooms(); }
+  async drain(timeoutMs: number) {
+    this.accepting = false;
+    const sockets = [...this.clients.keys()];
+    for (const client of this.clients.values()) await client.flight;
+    await Promise.all(sockets.map((socket) => new Promise<void>((resolve) => {
+      if (socket.readyState === WebSocket.CLOSED) { resolve(); return; }
+      const timer = setTimeout(() => { socket.terminate(); resolve(); }, timeoutMs);
+      socket.once("close", () => { clearTimeout(timer); resolve(); });
+      socket.close(1001, "Server is shutting down");
+    })));
+    await Promise.all(sockets.map((socket) => this.unregister(socket)));
+    await this.flush();
+    await disposeDocumentRooms();
+  }
+}
+const manager = new YjsDocumentManager();
+export const createYjsServer = () => manager;
+export const getYjsManager = () => manager;
+export const drainYjsServer = (timeoutMs: number) => manager.drain(timeoutMs);

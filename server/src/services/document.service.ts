@@ -328,7 +328,7 @@ export const getDocumentById = async (
 
   const { rows } = await db.query(
     `
-      SELECT d.id, d.title, d.content, d.updated_at, d.owner_id, ${workspaceSelect}, ${starSelect}
+      SELECT d.id, d.title, d.content, d.revision, d.updated_at, d.owner_id, ${workspaceSelect}, ${starSelect}
       FROM documents d
       ${joinClause}
       ${starJoin}
@@ -380,8 +380,8 @@ export const createDocument = async (payload: {
     values.push("NOW()");
 
     const returningFields = schema.hasWorkspaceId
-      ? "id, title, content, updated_at, owner_id, workspace_id"
-      : "id, title, content, updated_at, owner_id";
+      ? "id, title, content, revision, updated_at, owner_id, workspace_id"
+      : "id, title, content, revision, updated_at, owner_id";
 
     const { rows } = await client.query(
       `
@@ -417,99 +417,12 @@ export const createDocument = async (payload: {
   }
 };
 
-export const updateDocument = async (payload: {
-  id: string;
-  workspaceId: string;
-  title?: string;
-  content?: TipTapContent;
-}): Promise<DocumentModel | null> => {
-  const schema = await getDocumentSchemaInfo();
-  const { params, addParam } = createParamBuilder();
-  const idParam = addParam(payload.id);
-  const titleParam = addParam(payload.title ?? null);
-  const contentParam = addParam(payload.content ? JSON.stringify(payload.content) : null);
-  const contentExpression = schema.contentType === "jsonb" ? `${contentParam}::jsonb` : contentParam;
-  let workspaceClause = "";
-  if (schema.hasWorkspaceId) {
-    const workspaceParam = addParam(payload.workspaceId);
-    workspaceClause = `AND workspace_id = ${workspaceParam}`;
-  }
-  const deletedClause = schema.hasDeletedAt ? "AND deleted_at IS NULL" : "";
-  const returningFields = schema.hasWorkspaceId
-    ? "id, title, content, updated_at, owner_id, workspace_id"
-    : "id, title, content, updated_at, owner_id";
-
-  const { rows } = await db.query(
-    `
-      UPDATE documents
-      SET title = COALESCE(${titleParam}, title),
-          content = COALESCE(${contentExpression}, content),
-          updated_at = NOW()
-      WHERE id = ${idParam}
-      ${workspaceClause}
-      ${deletedClause}
-      RETURNING ${returningFields}
-    `,
-    params
+export const setStarDocument = async (documentId: string, userId: string, isStarred: boolean): Promise<{ isStarred: boolean }> => {
+  if (isStarred) await db.query(
+    "INSERT INTO starred_documents (document_id,user_id) VALUES($1,$2) ON CONFLICT(document_id,user_id) DO NOTHING", [documentId,userId]
   );
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  const document = mapDocumentRow(rows[0]);
-  if (!schema.hasWorkspaceId) {
-    document.workspaceId = payload.workspaceId;
-  }
-  return document;
-};
-
-export const toggleStarDocument = async (
-  documentId: string,
-  userId: string
-): Promise<{ isStarred: boolean }> => {
-  const schema = await getDocumentSchemaInfo();
-  if (!schema.hasStarredDocuments) {
-    throw new Error("Starred documents table is not available.");
-  }
-
-  const { params, addParam } = createParamBuilder();
-  const documentParam = addParam(documentId);
-  const userParam = addParam(userId);
-
-  const { rows } = await db.query(
-    `
-      SELECT 1
-      FROM starred_documents
-      WHERE document_id = ${documentParam}
-        AND user_id = ${userParam}
-      LIMIT 1
-    `,
-    params
-  );
-
-  if (rows.length > 0) {
-    await db.query(
-      `
-        DELETE FROM starred_documents
-        WHERE document_id = ${documentParam}
-          AND user_id = ${userParam}
-      `,
-      params
-    );
-    return { isStarred: false };
-  }
-
-  await db.query(
-    `
-      INSERT INTO starred_documents (document_id, user_id)
-      VALUES (${documentParam}, ${userParam})
-      ON CONFLICT (document_id, user_id) DO NOTHING
-    `,
-    params
-  );
-
-  return { isStarred: true };
+  else await db.query("DELETE FROM starred_documents WHERE document_id=$1 AND user_id=$2", [documentId,userId]);
+  return { isStarred };
 };
 
 export const getStarredDocuments = async (
