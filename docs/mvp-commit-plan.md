@@ -31,7 +31,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | [x] | C08 | `fix(server): drain sockets and flush pending state on shutdown` | Collaboration |
 | [x] | C09 | `fix(sharing): enforce grant lifecycle and collaborator removal` | Access control |
 | [x] | C10 | `fix(security): validate API payloads and constrain socket traffic` | Access control |
-| [ ] | C11 | `fix(offline): build the service worker and restore cached sessions` | Essential UX |
+| [x] | C11 | `fix(offline): build the service worker and restore cached sessions` | Essential UX |
 | [ ] | C12 | `feat(auth): implement password recovery and provider availability` | Essential UX |
 | [ ] | C13 | `fix(ui): complete recovery screens and mobile workflows` | Essential UX |
 | [ ] | C14 | `chore(server): prepare a reproducible VPS runtime` | Release preparation |
@@ -200,6 +200,8 @@ Add entries here as implementation commits land. The planning document itself do
 C09 verification: share-link inspection no longer increments usage; a row-locked transaction increments usage only when a new member is inserted, so reconnects do not consume another redemption and `maxUses` cannot be raced. Owner-only collaborator endpoints list, change, and remove members; access changes close that member's sockets. Link revocation closes guest sockets while preserving existing membership. Targeted `test:stack -- --grep "share validation" --reuse-server-build` passed with the disposable PostgreSQL database.
 
 C10 verification: bounded document titles/JSON and IDs receive controlled 400 responses; API body size and per-IP document API request rates are limited; socket handshakes enforce the configured frontend origin allowlist, frames are size-capped, client connections are bounded per document, and heartbeat cleanup reaps stale sockets. Targeted production-stack browser checks passed for invalid content and foreign-origin socket rejection. Full workspace lint, typecheck, unit tests, and production build passed.
+
+C11 verification: the production-stack Playwright check confirms the compiled worker is served at the app origin, controls a deep link, reloads the cached document shell/content while offline, and presents the cached-identity offline status. Only this test opts into service workers; the rest of the browser suite keeps them blocked. Workspace lint, typecheck, unit tests, and production builds passed. The full stack run passes migrations and backend integration plus 17/20 browser cases; three editor regression cases fail around document creation/shared-link navigation and are outside C11. First-visit offline, account-switch, and worker-update-with-pending-draft cases remain release acceptance checks.
 
 | Plan ID | Commit hash | Commands/scenarios checked | Outcome / remaining limitation |
 | --- | --- | --- | --- |

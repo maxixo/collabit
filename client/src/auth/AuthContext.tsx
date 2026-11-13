@@ -28,7 +28,7 @@ export interface AuthUser {
   image?: string;
 }
 
-type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+type AuthStatus = "loading" | "authenticated" | "unauthenticated" | "offline";
 
 type AuthContextValue = {
   status: AuthStatus;
@@ -39,6 +39,7 @@ type AuthContextValue = {
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const CACHED_IDENTITY_KEY = "collabit.cached-identity.v1";
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -97,18 +98,30 @@ const parseSessionUser = (payload: unknown): AuthUser | null => {
   };
 };
 
+const readCachedIdentity = (): AuthUser | null => {
+  try {
+    const value = localStorage.getItem(CACHED_IDENTITY_KEY);
+    const user = value ? JSON.parse(value) as AuthUser : null;
+    return user && typeof user.id === "string" && user.id.length > 0 ? user : null;
+  } catch { return null; }
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [status, setStatus] = useState<AuthStatus>("loading");
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(() => readCachedIdentity());
   const sequence = useRef(0);
   const channel = useRef<BroadcastChannel | null>(null);
-  const confirmedUserId = useRef<string | null>(null);
+  const confirmedUserId = useRef<string | null>(readCachedIdentity()?.id ?? null);
   const localLogout = useRef(false);
   const commitSession = useCallback((nextUser: AuthUser | null) => {
     const id = nextUser?.id ?? null;
     setOfflineAccount(id);
     setUser(nextUser);
     setStatus(nextUser ? "authenticated" : "unauthenticated");
+    try {
+      if (nextUser) localStorage.setItem(CACHED_IDENTITY_KEY, JSON.stringify(nextUser));
+      else localStorage.removeItem(CACHED_IDENTITY_KEY);
+    } catch { /* Offline identity persistence is optional when storage is unavailable. */ }
     if (confirmedUserId.current !== id) channel.current?.postMessage("invalidate");
     confirmedUserId.current = id;
   }, []);
@@ -131,9 +144,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         payload = null;
       }
 
-      if (attempt === sequence.current) commitSession(response.ok ? parseSessionUser(payload) : null);
+      if (attempt !== sequence.current) return;
+      if (response.ok) {
+        const sessionUser = parseSessionUser(payload);
+        if (sessionUser) commitSession(sessionUser);
+        else setStatus("offline");
+      } else if (response.status === 401 || response.status === 403) {
+        commitSession(null);
+      } else {
+        setStatus("offline");
+      }
     } catch {
-      if (attempt === sequence.current) commitSession(null);
+      if (attempt === sequence.current) setStatus("offline");
     }
   }, [commitSession]);
 
@@ -143,6 +165,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setOfflineAccount(null);
     setUser(null);
     setStatus("unauthenticated");
+    try { localStorage.removeItem(CACHED_IDENTITY_KEY); } catch { /* Ignore unavailable storage. */ }
     confirmedUserId.current = null;
     const response = await fetch(`${API_BASE_URL}/api/auth/logout`, { method: "POST", credentials: "include" });
     if (response.ok) channel.current?.postMessage("invalidate");
@@ -152,6 +175,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (typeof BroadcastChannel !== "undefined") {
       channel.current = new BroadcastChannel("collabit-auth");
       channel.current.onmessage = () => {
+        try { localStorage.removeItem(CACHED_IDENTITY_KEY); } catch { /* Ignore unavailable storage. */ }
+        setUser(null);
         setOfflineAccount(null);
         setStatus("loading");
         void refresh();
@@ -159,6 +184,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
     const revalidate = () => { if (!localLogout.current) void refresh(); };
     window.addEventListener("focus", revalidate);
+    const cached = readCachedIdentity();
+    if (cached) setOfflineAccount(cached.id);
     void refresh();
     return () => {
       channel.current?.close();
