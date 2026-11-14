@@ -20,6 +20,8 @@ Follow the [commit-by-commit plan](docs/mvp-commit-plan.md) for the remaining MV
 
 The release target is a Vercel frontend and one Node backend process on a VPS. Complete the MVP acceptance checks before deploying production.
 
+For the VPS backend image, PostgreSQL Compose services, migration job, and Nginx TLS/WebSocket proxy setup, see the [VPS deployment guide](server/deployment-vps.md).
+
 ## Local Development
 
 ### Prerequisites
