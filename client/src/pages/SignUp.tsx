@@ -271,9 +271,9 @@ export const SignUp = () => {
           <div className="text-center mt-8">
             <p className="text-gray-500 text-xs leading-relaxed">
               By signing up, you agree to our 
-              <a className="underline hover:text-gray-400 mx-1" href="#">Terms of Service</a>
+              <Link className="underline hover:text-gray-400 mx-1" to="/terms">Terms of Service</Link>
               and
-              <a className="underline hover:text-gray-400 ml-1" href="#">Privacy Policy</a>.
+              <Link className="underline hover:text-gray-400 ml-1" to="/privacy">Privacy Policy</Link>.
             </p>
           </div>
         </div>

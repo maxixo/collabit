@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ShareToken } from "@shared/types";
+import { useModalAccessibility } from "../hooks/useModalAccessibility";
 import {
   generateShareToken,
   getDocumentMembers,
@@ -40,6 +41,8 @@ const formatExpiration = (value: string | null) => {
 };
 
 export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }: ShareModalProps) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalAccessibility(dialogRef, true, onClose);
   const [permission, setPermission] = useState<SharePermissionOption>("editor");
   const [expirationOption, setExpirationOption] = useState<ExpirationOption>("never");
   const [customExpiration, setCustomExpiration] = useState("");
@@ -243,6 +246,11 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
       data-testid="share-modal-backdrop"
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Share this document"
+        tabIndex={-1}
+        ref={dialogRef}
         className="max-w-xl w-full mx-4 bg-white dark:bg-[#16172d] rounded-2xl shadow-2xl overflow-hidden"
         onClick={(event) => event.stopPropagation()}
         data-testid="share-modal"

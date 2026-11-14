@@ -131,6 +131,7 @@ type EditorSurfaceProps = {
   autoFocusTitle?: boolean;
   loading?: boolean;
   error?: string | null;
+  onRetryLoad?: () => void;
   shareToken?: string | null;
   suggestions?: DocumentSuggestion[];
   canReviewSuggestions?: boolean;
@@ -163,6 +164,7 @@ export const EditorSurface = ({
   docTitle,
   loading = false,
   error = null,
+  onRetryLoad,
   shareToken = null,
   suggestions = [],
   canReviewSuggestions = false,
@@ -866,7 +868,7 @@ export const EditorSurface = ({
       </div>
 
       <div
-        className="relative mx-auto my-12 min-h-[1000px] max-w-[800px] bg-white p-24 text-[#0d0e1b] dark:text-[#0d0e1b]"
+        className="relative mx-auto my-4 min-h-[calc(100vh-10rem)] w-full max-w-[800px] bg-white p-4 text-[#0d0e1b] dark:text-[#0d0e1b] sm:my-8 sm:p-8 md:my-12 md:min-h-[1000px] md:p-24"
         data-testid="editor-surface"
       >
         {roomError && <p role="alert" className="mb-4 text-sm text-rose-700">{roomError}</p>}
@@ -1026,9 +1028,12 @@ export const EditorSurface = ({
             </div>
           ) : null}
           {loading ? (
-            <p className="text-base text-[#4c4d9a] dark:text-[#8a8bbd]">Loading document...</p>
+            <p role="status" className="text-base text-[#4c4d9a] dark:text-[#8a8bbd]">Loading document...</p>
           ) : error ? (
-            <p className="text-base text-red-500">{error}</p>
+            <div role="alert" className="space-y-3 text-red-700">
+              <p>{error}</p>
+              {onRetryLoad ? <button className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold hover:bg-red-50" type="button" onClick={onRetryLoad}>Try loading again</button> : null}
+            </div>
           ) : safeEditor && documentId ? (
             <div className="relative" data-testid="editor-content">
               <EditorContent editor={safeEditor} className="tiptap text-lg leading-relaxed [&_[data-suggestion-id]]:cursor-pointer [&_.suggestion-decoration]:rounded-[0.35rem] [&_.suggestion-decoration]:px-0.5 [&_.suggestion-decoration]:text-[#2a2150] [&_.suggestion-decoration-insert]:bg-[#d6c8ff] [&_.suggestion-decoration-insert]:shadow-[inset_0_-1px_0_rgba(139,92,246,0.25)] [&_.suggestion-decoration-replace]:bg-[#cfe6ff] [&_.suggestion-decoration-replace]:shadow-[inset_0_-1px_0_rgba(59,130,246,0.25)] [&_.suggestion-decoration-delete-widget]:mx-1 [&_.suggestion-decoration-delete-widget]:inline-flex [&_.suggestion-decoration-delete-widget]:items-center [&_.suggestion-decoration-delete-widget]:rounded-full [&_.suggestion-decoration-delete-widget]:border [&_.suggestion-decoration-delete-widget]:border-rose-300 [&_.suggestion-decoration-delete-widget]:bg-rose-50 [&_.suggestion-decoration-delete-widget]:px-2 [&_.suggestion-decoration-delete-widget]:py-0.5 [&_.suggestion-decoration-delete-widget]:text-xs [&_.suggestion-decoration-delete-widget]:font-medium [&_.suggestion-decoration-delete-widget]:text-rose-700 [&_.suggestion-decoration-delete-widget]:line-through" />

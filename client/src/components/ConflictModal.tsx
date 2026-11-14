@@ -1,4 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
+import { useRef } from "react";
+import { useModalAccessibility } from "../hooks/useModalAccessibility";
 
 interface ConflictModalProps {
   isOpen: boolean;
@@ -57,13 +59,15 @@ export const ConflictModal = ({
   onDownloadLocal,
   onClose
 }: ConflictModalProps) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalAccessibility(dialogRef, isOpen, onClose);
   if (!isOpen) {
     return null;
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div role="dialog" aria-modal="true" aria-label="Resolve document conflict" className="mx-4 w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#16172d]">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Resolve document conflict" tabIndex={-1} className="mx-4 max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white shadow-2xl dark:bg-[#16172d]">
         <div className="flex items-center justify-between border-b border-[#e7e7f3] bg-[#f8f8fc] px-6 py-4 dark:border-[#2a2b4a] dark:bg-[#1e1f3a]">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-600">

@@ -73,8 +73,8 @@ const docsCards = [
 const footerLinks = [
   { href: "#features", label: "Features" },
   { href: "#pricing", label: "Pricing" },
-  { href: "#privacy", label: "Privacy" },
-  { href: "#terms", label: "Terms" },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/terms", label: "Terms" },
   { href: "#about", label: "About" },
   { href: "#docs", label: "Docs" }
 ] as const;
@@ -423,13 +423,15 @@ export const Landing = () => {
             </div>
             <div className="flex flex-wrap justify-center gap-8">
               {footerLinks.map((item) => (
-                <a
+                item.href.startsWith("/") ? <Link
+                  key={item.label}
+                  className="font-label text-xs text-slate-500 transition-colors hover:text-indigo-500 dark:text-slate-400"
+                  to={item.href}
+                >{item.label}</Link> : <a
                   key={item.label}
                   className="font-label text-xs text-slate-500 transition-colors hover:text-indigo-500 dark:text-slate-400"
                   href={item.href}
-                >
-                  {item.label}
-                </a>
+                >{item.label}</a>
               ))}
               <SocialLink label="Twitter" />
               <SocialLink label="GitHub" />

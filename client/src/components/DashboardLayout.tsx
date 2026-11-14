@@ -58,8 +58,8 @@ const DashboardLayoutInner = ({
 
   return (
     <div className="bg-background-light font-['Inter',_sans-serif] text-[#0d0e1b] dark:bg-background-dark dark:text-[#f8f8fc]">
-      <div className="flex min-h-screen overflow-hidden">
-        <aside className="z-20 flex w-64 flex-col justify-between border-r border-[#e7e7f3] bg-white p-4 dark:border-[#2a2b4a] dark:bg-[#16172d]">
+      <div className="flex min-h-screen flex-col overflow-hidden md:flex-row">
+        <aside className="z-20 hidden w-64 shrink-0 flex-col justify-between border-r border-[#e7e7f3] bg-white p-4 dark:border-[#2a2b4a] dark:bg-[#16172d] md:flex">
           <div className="flex flex-col gap-6">
             <div className="flex items-center gap-3 p-2">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-white">
@@ -156,25 +156,23 @@ const DashboardLayoutInner = ({
             </div>
           ) : null}
 
-          <header className="sticky top-0 z-10 flex items-center justify-end border-b border-[#e7e7f3] bg-background-light px-8 py-4 dark:border-[#2a2b4a] dark:bg-background-dark">
-            <div className="flex items-center gap-4">
-              <button
-                className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#e7e7f3] text-[#0d0e1b] dark:bg-[#1e1f3a] dark:text-white"
-                type="button"
-              >
-                <span className="material-symbols-outlined">notifications</span>
+          <header className="sticky top-0 z-10 flex flex-col gap-3 border-b border-[#e7e7f3] bg-background-light px-4 py-3 dark:border-[#2a2b4a] dark:bg-background-dark sm:px-8 md:flex-row md:items-center md:justify-end">
+            <nav aria-label="Workspace navigation" className="flex items-center gap-1 overflow-x-auto md:hidden">
+              <Link className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold" to={buildWorkspacePath("/editor/recent", workspaceId)}>Recent</Link>
+              <Link className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold" to={buildWorkspacePath("/editor/starred", workspaceId)}>Starred</Link>
+              <Link className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold" to={buildWorkspacePath("/editor/shared", workspaceId)}>Shared</Link>
+              <Link className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold" to={buildWorkspacePath("/editor/trash", workspaceId)}>Trash</Link>
+              <Link className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold" to={buildWorkspacePath("/profile", workspaceId)}>Profile</Link>
+              <button className="ml-auto whitespace-nowrap rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="button" onClick={onCreateDocument} disabled={isCreating}>
+                {isCreating ? "Creating…" : "New document"}
               </button>
-              <button
-                className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#e7e7f3] text-[#0d0e1b] dark:bg-[#1e1f3a] dark:text-white"
-                type="button"
-              >
-                <span className="material-symbols-outlined">help</span>
-              </button>
+            </nav>
+            <div className="flex items-center justify-end gap-4">
               <UserMenu />
             </div>
           </header>
 
-          <div className="p-8">
+          <div className="p-4 sm:p-8">
             <div className="mb-8 flex items-end justify-between gap-4">
               <div>
                 <h2 className="mb-2 text-3xl font-black tracking-tight">{pageTitle}</h2>

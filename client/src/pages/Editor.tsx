@@ -405,7 +405,7 @@ export const Editor = () => {
 
     try {
       const created = await createDocument({
-        title: "",
+        title: "Untitled document",
         content: emptyContent as Record<string, unknown>,
         workspaceId
       });
@@ -816,8 +816,16 @@ export const Editor = () => {
 
   return (
     <div className="editor-view bg-background-light text-[#0d0e1b] dark:bg-background-dark dark:text-[#f8f8fc] font-['Inter',_sans-serif]">
-      <div className="flex h-screen overflow-hidden">
-        <aside className="flex w-64 flex-col shrink-0 border-r border-[#e7e7f3] bg-background-light dark:border-[#2d2e4a] dark:bg-background-dark">
+      <div className="flex h-screen flex-col overflow-hidden md:flex-row">
+        <nav aria-label="Mobile document navigation" className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[#e7e7f3] bg-background-light px-3 py-2 dark:border-[#2d2e4a] dark:bg-background-dark md:hidden">
+          <Link className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium" to={buildWorkspaceRoute("/editor/recent")}>Recent</Link>
+          <Link className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium" to={buildWorkspaceRoute("/editor/starred")}>Starred</Link>
+          <Link className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium" to={buildWorkspaceRoute("/editor/shared")}>Shared</Link>
+          <button className="ml-auto whitespace-nowrap rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="button" onClick={handleCreateDocument} disabled={isCreating || !workspaceId}>
+            {isCreating ? "Creating…" : "New document"}
+          </button>
+        </nav>
+        <aside className="hidden w-64 shrink-0 flex-col border-r border-[#e7e7f3] bg-background-light dark:border-[#2d2e4a] dark:bg-background-dark md:flex">
           <div className="flex h-full flex-col gap-6 p-4">
             <div className="flex flex-col">
               <h1 className="text-base font-bold leading-normal text-[#0d0e1b] dark:text-white">Workspace</h1>
@@ -891,13 +899,6 @@ export const Editor = () => {
                 <span className="material-symbols-outlined">delete</span>
                 <span className="text-sm font-medium">Trash</span>
               </Link>
-              <a
-                className="flex items-center gap-3 rounded-lg px-3 py-2 text-[#4c4d9a] hover:bg-[#e7e7f3]/50 dark:text-[#8a8bbd] dark:hover:bg-[#1c1d3a]/50"
-                href="#"
-              >
-                <span className="material-symbols-outlined">folder</span>
-                <span className="text-sm font-medium">Collections</span>
-              </a>
               <p className="mb-2 mt-6 px-3 text-[11px] font-bold uppercase tracking-wider text-[#4c4d9a]">
                 {searchActive ? "Search Results" : "Recent Docs"}
               </p>
@@ -963,9 +964,9 @@ export const Editor = () => {
         </aside>
 
         <main className="relative flex min-w-0 flex-1 flex-col bg-white dark:bg-background-dark">
-          <header className="z-20 flex h-16 items-center justify-between border-b border-[#e7e7f3] bg-white/80 px-8 backdrop-blur-md dark:border-[#2d2e4a] dark:bg-background-dark/80">
-            <div className="flex flex-col">
-              <div className="mb-0.5 flex items-center gap-1.5 text-xs font-medium text-[#4c4d9a]">
+          <header className="z-20 flex min-h-16 items-center justify-between gap-2 border-b border-[#e7e7f3] bg-white/80 px-3 py-2 backdrop-blur-md dark:border-[#2d2e4a] dark:bg-background-dark/80 md:px-8">
+            <div className="min-w-0 flex flex-col">
+              <div className="mb-0.5 flex min-w-0 items-center gap-1.5 truncate text-xs font-medium text-[#4c4d9a]">
                 <Link className="transition-colors hover:text-primary" to={buildWorkspaceRoute("/editor/recent")}>
                   Docs
                 </Link>
@@ -975,7 +976,7 @@ export const Editor = () => {
               <h2 className="text-base font-bold text-[#0d0e1b] capitalize dark:text-white">{displayTitle}</h2>
             </div>
 
-            <div className="flex items-center gap-6">
+            <div className="flex shrink-0 items-center gap-2 md:gap-6">
               {/* Presence/Collaborators */}
               <div className="flex items-center">
                 <div className="flex -space-x-3 overflow-hidden">
@@ -1037,6 +1038,7 @@ export const Editor = () => {
                   onClick={() => setShowHistoryModal(true)}
                   disabled={!workspaceId || !documentId}
                   title="View document history"
+                  aria-label="Open document history"
                 >
                   <span className="material-symbols-outlined">history</span>
                 </button>
@@ -1083,12 +1085,6 @@ export const Editor = () => {
                     </div>
                   )}
                 </div>
-                <button
-                  className="rounded-lg p-2 text-[#4c4d9a] transition-colors hover:bg-background-light dark:hover:bg-[#1c1d3a]"
-                  type="button"
-                >
-                  <span className="material-symbols-outlined">notifications</span>
-                </button>
                 <button
                   className={`rounded-lg p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     isStarred
@@ -1194,6 +1190,7 @@ export const Editor = () => {
               docTitle={docTitle}
               loading={effectiveLoading}
               error={effectiveError}
+              onRetryLoad={reloadDocument}
               shareToken={shareToken}
               suggestions={suggestions}
               canReviewSuggestions={accessRole === "owner"}

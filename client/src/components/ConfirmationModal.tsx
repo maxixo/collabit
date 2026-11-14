@@ -1,3 +1,6 @@
+import { useRef } from "react";
+import { useModalAccessibility } from "../hooks/useModalAccessibility";
+
 interface ConfirmationModalProps {
   isOpen: boolean;
   title: string;
@@ -25,6 +28,8 @@ export const ConfirmationModal = ({
   onConfirm,
   onClose
 }: ConfirmationModalProps) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalAccessibility(dialogRef, isOpen, onClose);
   if (!isOpen) {
     return null;
   }
@@ -45,7 +50,12 @@ export const ConfirmationModal = ({
       onClick={onClose}
     >
       <div
-        className="mx-4 w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#16172d]"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirmation-modal-title"
+        tabIndex={-1}
+        className="mx-4 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl dark:bg-[#16172d]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#e7e7f3] bg-[#f8f8fc] px-6 py-4 dark:border-[#2a2b4a] dark:bg-[#1e1f3a]">
@@ -54,7 +64,7 @@ export const ConfirmationModal = ({
               <span className="material-symbols-outlined">{icon}</span>
             </div>
             <div>
-              <h2 className="text-lg font-bold text-[#0d0e1b] dark:text-white">{title}</h2>
+              <h2 id="confirmation-modal-title" className="text-lg font-bold text-[#0d0e1b] dark:text-white">{title}</h2>
               {description ? (
                 <p className="text-sm text-[#4c4d9a] dark:text-[#a1a1c9]">{description}</p>
               ) : null}

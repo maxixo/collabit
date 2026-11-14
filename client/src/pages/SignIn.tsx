@@ -111,12 +111,12 @@ export const SignIn = () => {
           </div>
           <div className="relative z-10 flex gap-6 text-xs font-semibold uppercase tracking-widest text-white/60">
             <span>2024 Collabit Inc.</span>
-            <a className="transition-colors hover:text-white" href="#">
+            <Link className="transition-colors hover:text-white" to="/privacy">
               Privacy
-            </a>
-            <a className="transition-colors hover:text-white" href="#">
+            </Link>
+            <Link className="transition-colors hover:text-white" to="/terms">
               Terms
-            </a>
+            </Link>
           </div>
         </section>
 

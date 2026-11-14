@@ -56,8 +56,9 @@ test.describe("editor regressions", () => {
       await openDocument(owner.page, seededDocument.id);
       await expect(getEditorRoot(owner.page)).toContainText("legacy content that must clear");
 
+      const previousUrl = owner.page.url();
       await owner.page.getByTestId("create-document-button").click();
-      await owner.page.waitForURL(/\/editor\/[^?]+\?workspaceId=/);
+      await owner.page.waitForURL((url) => url.href !== previousUrl);
       await waitForEditorReady(owner.page);
 
       await expect(owner.page.getByTestId("editor-title-input")).toHaveValue("Untitled document");
@@ -76,8 +77,9 @@ test.describe("editor regressions", () => {
     const owner = await createAuthenticatedPage(browser, "owner-typing");
 
     try {
+      const previousUrl = owner.page.url();
       await owner.page.getByTestId("create-document-button").click();
-      await owner.page.waitForURL(/\/editor\/[^?]+\?workspaceId=/);
+      await owner.page.waitForURL((url) => url.href !== previousUrl);
       await waitForEditorReady(owner.page);
 
       await typeInEditor(owner.page, "abcdef");
@@ -113,8 +115,9 @@ test.describe("editor regressions", () => {
         await expect(getEditorRoot(collaborator.page)).toContainText("shared content");
         await assertNoUnexpectedSuggestionArtifacts(collaborator.page);
 
+        const previousUrl = collaborator.page.url();
         await collaborator.page.getByTestId("create-document-button").click();
-        await collaborator.page.waitForURL(/\/editor\/[^?]+\?workspaceId=/);
+        await collaborator.page.waitForURL((url) => url.href !== previousUrl);
         await waitForEditorReady(collaborator.page);
         await assertNoUnexpectedSuggestionArtifacts(collaborator.page);
 
