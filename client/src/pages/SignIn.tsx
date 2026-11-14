@@ -5,12 +5,14 @@ import { signInWithEmail } from "../services/auth.service";
 import { DEFAULT_AUTH_REDIRECT_PATH, useAuth } from "../auth/AuthContext";
 import { normalizeRedirectPath, resolveRedirectFromState, storeRedirectPath } from "../auth/redirect";
 import { buildOAuthRedirectPath, isTruthyParam } from "../services/auth.service";
+import { useAuthProviders } from "../auth/useAuthProviders";
 
 export const SignIn = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { refresh, getRedirectPath } = useAuth();
+  const { google } = useAuthProviders();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -165,9 +167,9 @@ export const SignIn = () => {
                   <label className="text-sm font-semibold text-[#fafafa]" htmlFor="sign-in-password">
                     Password
                   </label>
-                  <a className="text-xs font-bold text-[#8b5cf6] transition-colors hover:text-[#a78bfa]" href="#">
+                  <Link className="text-xs font-bold text-[#8b5cf6] transition-colors hover:text-[#a78bfa]" to="/auth/forgot-password">
                     Forgot Password?
-                  </a>
+                  </Link>
                 </div>
                 <div className="relative flex items-center">
                   <input
@@ -203,15 +205,14 @@ export const SignIn = () => {
 
             {error ? <p className="mt-6 text-sm text-red-400">{error}</p> : null}
 
+            {google ? <>
             <div className="relative my-10 flex items-center">
               <div className="flex-grow border-t border-white/10"></div>
-              <span className="mx-4 flex-shrink text-xs font-bold uppercase tracking-widest text-gray-500">
-                Or continue with
-              </span>
+              <span className="mx-4 flex-shrink text-xs font-bold uppercase tracking-widest text-gray-500">Or continue with</span>
               <div className="flex-grow border-t border-white/10"></div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div>
               <OAuthGoogleButton
                 label="Sign in with Google"
                 className="flex h-14 w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/5 text-[#fafafa] transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
@@ -232,19 +233,8 @@ export const SignIn = () => {
                 />
                 <span className="text-sm font-bold">Google</span>
               </OAuthGoogleButton>
-              <button
-                className="flex h-14 w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/5 text-[#fafafa] transition-colors hover:bg-white/10"
-                type="button"
-                aria-label="Sign in with Apple"
-              >
-                <img
-                  alt="Apple logo"
-                  className="h-5 w-5 invert"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuAsF8p0FDtUXdsQNUB8tx7ZQl9oSh74a4VzAWGhDGCGj6QifR2QnAioxXEE4SjtMnXSjZq5H2nvNtvQ-IHZhHfmjUO39yrv6uEu-dVPBFVN3Y-Kk5EnyiBKjZQbFSvnbMIG80rWuIDv5PIYvjMjf56pN8-BauQ-SUNcf_UZiiBbLbha7k6yd37Aq23RXG9qv1J4tgh1sL8jmWrmFWv3PP9X6LCLndF8sLzV4B8cVsKInWeSTkjG81p9hAmx1UX1vTId5eZTfCI5PQ"
-                />
-                <span className="text-sm font-bold">Apple</span>
-              </button>
             </div>
+            </> : null}
           </div>
         </section>
       </main>

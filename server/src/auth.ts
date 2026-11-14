@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { db } from "./config/db.js";
 import { env } from "./config/env.js";
+import { sendPasswordResetEmail } from "./services/email.service.js";
 
 if (!env.databaseUrl) {
   throw new Error("DATABASE_URL is required for Better Auth");
@@ -33,7 +34,14 @@ export const auth = betterAuth({
     storeStateStrategy: "database"
   },
   emailAndPassword: {
-    enabled: true
+    enabled: true,
+    minPasswordLength: 8,
+    maxPasswordLength: 128,
+    resetPasswordTokenExpiresIn: 60 * 60,
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url }: { user: { email: string }; url: string }) => {
+      await sendPasswordResetEmail(user.email, url);
+    }
   },
   socialProviders: googleConfig,
   advanced: advancedConfig

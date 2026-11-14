@@ -11,6 +11,12 @@ Current coverage focuses on the Phase 1 public-release hardening work:
 - profile payload validation
 - workspace naming fallback behavior
 
+## Password recovery
+
+Password reset links use Better Auth's one-hour, single-use verification tokens and revoke the user's existing sessions after a successful reset. The delivery adapter uses SMTP settings from `.env.example`; local development can point those settings at Mailpit (`SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_SECURE=false`). Production deployments must configure a real sender and SMTP credentials before enabling public signup.
+
+The isolated browser stack captures reset mail in process memory only when `NODE_ENV=test`. Its mailbox endpoint is registered only in that test environment. The browser regression exercises an unknown address, requests a real Better Auth reset link for a disposable account, follows the link, changes the password, verifies the prior session and password are rejected, and confirms token replay fails.
+
 ## Migration integration tests
 
 Build the backend, set `MIGRATION_TEST_DATABASE_URL` to a local disposable PostgreSQL admin connection, then run:

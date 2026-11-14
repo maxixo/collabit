@@ -36,8 +36,11 @@ Create `.env` from `.env.example` and set:
 - `AUTH_SECRET`
 - `AUTH_BASE_URL`
 - `CORS_ORIGINS`
+- `CLIENT_BASE_URL`
 - `VITE_API_BASE_URL`
 - `VITE_WS_URL`
+
+Password recovery sends one-hour reset links through SMTP. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`, and, when required by the provider, `SMTP_USER` and `SMTP_PASSWORD`. For local development, point SMTP at Mailpit on port 1025; configure a verified sender and provider credentials before enabling public signup in production.
 
 Optional for Google OAuth:
 

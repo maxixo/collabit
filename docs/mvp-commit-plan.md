@@ -32,7 +32,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | [x] | C09 | `fix(sharing): enforce grant lifecycle and collaborator removal` | Access control |
 | [x] | C10 | `fix(security): validate API payloads and constrain socket traffic` | Access control |
 | [x] | C11 | `fix(offline): build the service worker and restore cached sessions` | Essential UX |
-| [ ] | C12 | `feat(auth): implement password recovery and provider availability` | Essential UX |
+| [x] | C12 | `feat(auth): implement password recovery and provider availability` | Essential UX |
 | [ ] | C13 | `fix(ui): complete recovery screens and mobile workflows` | Essential UX |
 | [ ] | C14 | `chore(server): prepare a reproducible VPS runtime` | Release preparation |
 | [ ] | C15 | `chore(client): configure Vercel builds and production URLs` | Release preparation |
@@ -203,8 +203,11 @@ C10 verification: bounded document titles/JSON and IDs receive controlled 400 re
 
 C11 verification: the production-stack Playwright check confirms the compiled worker is served at the app origin, controls a deep link, reloads the cached document shell/content while offline, and presents the cached-identity offline status. Only this test opts into service workers; the rest of the browser suite keeps them blocked. Workspace lint, typecheck, unit tests, and production builds passed. The full stack run passes migrations and backend integration plus 17/20 browser cases; three editor regression cases fail around document creation/shared-link navigation and are outside C11. First-visit offline, account-switch, and worker-update-with-pending-draft cases remain release acceptance checks.
 
+C12 verification: production-stack browser checks cover the account-enumeration-safe request response, one-time Better Auth reset email link, reset completion, session invalidation, old/new password behavior, invalid/reused token rejection, and hidden Google controls when credentials are absent. Workspace lint and typechecks pass. Reset tokens expire after one hour. A real SMTP provider/sender and configured Google OAuth remain deployment inputs; configured OAuth and elapsed-time expiry need provider-backed acceptance checks.
+
 | Plan ID | Commit hash | Commands/scenarios checked | Outcome / remaining limitation |
 | --- | --- | --- | --- |
+| C12 | `git log -1 --format=%h --grep="^feat(auth): implement password recovery and provider availability$"` | Targeted `npm run test:stack -- --grep "password recovery\|Google OAuth"`; workspace lint and typecheck. | Passed. Test mode captures reset messages in-memory; production uses configurable SMTP. One-hour expiry is configured but elapsed-time expiry and live SMTP/OAuth provider round trips remain external acceptance checks. |
 | C00 | `a083302` | Documentation links, 18 commit entries, ignore exceptions, and staged whitespace/scope review. | Passed; earlier application edits excluded. |
 | C01 | `049d62c` | Fresh `npm ci --no-audit --no-fund`; lint; typecheck for all three workspaces; 13 helper tests; production builds. | Passed on Node 22.20.0. Six existing Fast Refresh warnings, stale Browserslist data, and editor bundle size warning remain. Sandbox blocked esbuild; the build passed with process execution allowed. |
 | C02 | This migration commit; resolve with `git log -1 --format=%h --grep="^fix(db): make migrations standalone and coordinated$"`. | `npm run ci:check`; `npm run test:migrations --workspace server` against the disposable localhost PostgreSQL cluster; documentation links and staged scope/whitespace review. | Passed on Node 22.20.0 and PostgreSQL 18.1: 13 helper tests plus 9 database regressions. Covers production startup refusing pending schema, fresh/status/repeat/concurrent runs, SQL/tracking rollback and retry, asset errors, prerequisite ordering, upgrade preservation, and CLI exit. Corrected the compiled backend/CLI layout and shared runtime imports. Existing SQL files unchanged. CI configured for disposable PostgreSQL 16; remote CI has not been run. |

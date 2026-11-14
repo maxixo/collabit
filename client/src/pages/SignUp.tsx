@@ -4,12 +4,15 @@ import { signUpWithEmail } from "../services/auth.service";
 import { DEFAULT_AUTH_REDIRECT_PATH, useAuth } from "../auth/AuthContext";
 import { normalizeRedirectPath, resolveRedirectFromState, storeRedirectPath } from "../auth/redirect";
 import { buildOAuthRedirectPath, isTruthyParam } from "../services/auth.service";
+import { OAuthGoogleButton } from "./OAuthGoogleButton";
+import { useAuthProviders } from "../auth/useAuthProviders";
 
 export const SignUp = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { refresh, getRedirectPath } = useAuth();
+  const { google } = useAuthProviders();
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     fullName: '',
@@ -85,10 +88,6 @@ export const SignUp = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleGoogleSignUp = () => {
-    setError("Google sign-up is not available yet.");
   };
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -230,7 +229,7 @@ export const SignUp = () => {
             </button>
             {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
-            {/* Divider */}
+            {google ? <>
             <div className="relative my-2">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-[#2a2a35]"></div>
@@ -240,11 +239,13 @@ export const SignUp = () => {
               </div>
             </div>
 
-            {/* Google Sign Up */}
-            <button
-              onClick={handleGoogleSignUp}
+            <OAuthGoogleButton
+              label="Sign up with Google"
               className="w-full bg-[#18181f] border border-[#2a2a35] hover:bg-[#1f1f28] transition-colors flex h-14 items-center justify-center rounded-2xl text-white font-semibold text-base gap-3"
-              type="button"
+              redirectPath={buildOAuthRedirectPath({
+                shareToken, shareRequested, collabRequested,
+                workspaceId: workspaceIdParam, redirectPath
+              })}
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"></path>
@@ -253,7 +254,8 @@ export const SignUp = () => {
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"></path>
               </svg>
               Sign up with Google
-            </button>
+            </OAuthGoogleButton>
+            </> : null}
           </form>
 
           {/* Footer Links */}
