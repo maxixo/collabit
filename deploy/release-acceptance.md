@@ -1,7 +1,7 @@
 # MVP release acceptance record
 
-**Recorded:** 16 November 2026  
-**Branch:** `mvp/c09-c11`  
+**Recorded:** 16 November 2026
+**Branch:** `mvp/c09-c11`
 **Result:** Local acceptance gates pass; the MVP is not yet cleared for public production traffic.
 
 ## Verified locally
