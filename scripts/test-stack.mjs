@@ -36,8 +36,8 @@ const port = () => new Promise((resolve, reject) => {
   });
 });
 
-const launch = (args, cwd, env, label) => {
-  const child = spawn(process.execPath, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const launch = (args, cwd, env, label, { ipc = false } = {}) => {
+  const child = spawn(process.execPath, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', ...(ipc ? ['ipc'] : [])] });
   children.add(child);
   child.stdout.on('data', (data) => log.write(`[${label}] ${data}`));
   child.stderr.on('data', (data) => log.write(`[${label}] ${data}`));
@@ -157,7 +157,28 @@ try {
         if (sourceRows.rows[0].count !== restoredRows.rows[0].count)
           throw new Error(`Backup restore row count differs for ${table}`);
       }
-      console.info('Custom-format database backup restored into a disposable database; core row counts match.');
+      const restoredPort = await port();
+      const restoredApi = `http://127.0.0.1:${restoredPort}`;
+      const restoredBackend = launch(['dist/server.js'], path.join(root, 'server'), {
+        ...env, PORT: String(restoredPort), DATABASE_URL: restoreUrl.toString(), AUTH_BASE_URL: restoredApi
+      }, 'restore-api', { ipc: true });
+      await ready(`${restoredApi}/ready`, restoredBackend);
+      const health = await fetch(`${restoredApi}/health`);
+      if (health.status !== 200) throw new Error(`Restored API liveness check returned ${health.status}`);
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Restored API did not stop after SIGTERM')), 10_000);
+        restoredBackend.once('exit', (code) => {
+          clearTimeout(timeout);
+          code === 0 ? resolve() : reject(new Error(`Restored API exited with ${code}`));
+        });
+        if (!restoredBackend.connected) {
+          clearTimeout(timeout);
+          reject(new Error('Restored API IPC channel was not available for graceful shutdown'));
+          return;
+        }
+        restoredBackend.send('shutdown');
+      });
+      console.info('Custom-format backup restored to a disposable DB; core rows match and the API passed liveness/readiness on restored data.');
     } finally {
       await sourcePool.end();
       await restoredPool.end();
