@@ -24,6 +24,8 @@ For the VPS backend image, PostgreSQL Compose services, migration job, and Nginx
 
 For Vercel project settings, public frontend environment variables, DNS/OAuth configuration, production smoke checks, and release rollback steps, see the [deployment guide](deploy/deployment-guide.md).
 
+For health checks, redacted logs, encrypted backup scheduling, disposable restore rehearsal, restart, and rollback procedures, see the [backend operations runbook](server/ops-runbook.md).
+
 
 ## Local Development
 

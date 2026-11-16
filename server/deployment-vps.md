@@ -77,7 +77,7 @@ The image health check calls `/ready`. Also verify the real frontend can sign in
 
 ## Back up and recover PostgreSQL
 
-Schedule encrypted off-host backups and test restores before public launch. For a one-off SQL dump:
+Schedule encrypted off-host backups and test restores before public launch. The [operations runbook](ops-runbook.md) describes the backup and disposable restore helpers, release restart order, log/health checks, and rollback constraints. For a one-off SQL dump:
 
 ```sh
 docker compose --env-file .env.production -f docker-compose.production.yml exec -T database \
