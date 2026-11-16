@@ -22,6 +22,9 @@ The release target is a Vercel frontend and one Node backend process on a VPS. C
 
 For the VPS backend image, PostgreSQL Compose services, migration job, and Nginx TLS/WebSocket proxy setup, see the [VPS deployment guide](server/deployment-vps.md).
 
+For Vercel project settings, public frontend environment variables, DNS/OAuth configuration, production smoke checks, and release rollback steps, see the [deployment guide](deploy/deployment-guide.md).
+
+
 ## Local Development
 
 ### Prerequisites

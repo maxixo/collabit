@@ -1,6 +1,6 @@
 # MVP commit roadmap
 
-Status: C00 through C13 complete; C14 packaging is implemented and awaiting Docker-capable deployment verification. Updated 14 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
+Status: C00 through C13 and C15 complete; C14 packaging is awaiting Docker-capable verification; C16 operations/recovery implementation is in progress. Updated 16 November 2026. Scope: finish the existing public MVP before deploying a Vercel frontend and one Node backend process on the owner's VPS.
 
 The [completion overview](mvp-completion-plan.md) contains the full product scope and acceptance matrix. Numbers identify roadmap items; the verification record below identifies completed commits. Mark an item complete only when its changes and passing verification record are committed together.
 
@@ -35,7 +35,7 @@ The [completion overview](mvp-completion-plan.md) contains the full product scop
 | [x] | C12 | `feat(auth): implement password recovery and provider availability` | Essential UX |
 | [x] | C13 | `fix(ui): complete recovery screens and mobile workflows` | Essential UX |
 | [ ] | C14 | `chore(server): prepare a reproducible VPS runtime` | Release preparation |
-| [ ] | C15 | `chore(client): configure Vercel builds and production URLs` | Release preparation |
+| [x] | C15 | `chore(client): configure Vercel builds and production URLs` | Release preparation |
 | [ ] | C16 | `chore(ops): add observability and recovery procedures` | Release preparation |
 | [ ] | C17 | `test(release): verify production MVP acceptance criteria` | Release acceptance |
 
@@ -209,11 +209,14 @@ C13 verification: the focused production-stack browser suite passes the policy/4
 
 C14 implementation: added a production-only multi-stage backend image, Compose database/API/migration services, private port bindings, production environment example, and Nginx HTTPS/WebSocket proxy template. Added [VPS deployment instructions](../server/deployment-vps.md) without changing the development Compose/Dockerfile. Docker, Compose, Podman, and Buildah are unavailable in this environment, so image build/inspection, migration startup, and proxy/API/cookie/WebSocket checks have not run. Keep C14 unchecked until those deployment-specific checks pass on a Docker-capable host.
 
+C15 verification: root Vercel configuration builds the client workspace to `client/dist` with an SPA rewrite; a production build using the documented API and WebSocket URLs passed and contained `service-worker.js`; Vite preview returned the app shell for `/`, `/signin`, `/editor/recent`, `/profile`, and `/trash`. Exact project settings and public variables are in the [Vercel + VPS deployment guide](../deploy/deployment-guide.md). Custom-domain TLS, OAuth, and cross-host cookie/WebSocket checks remain deployment-time acceptance steps.
+
 | Plan ID | Commit hash | Commands/scenarios checked | Outcome / remaining limitation |
 | --- | --- | --- | --- |
 | C12 | `git log -1 --format=%h --grep="^feat(auth): implement password recovery and provider availability$"` | Targeted `npm run test:stack -- --grep "password recovery\|Google OAuth"`; workspace lint and typecheck. | Passed. Test mode captures reset messages in-memory; production uses configurable SMTP. One-hour expiry is configured but elapsed-time expiry and live SMTP/OAuth provider round trips remain external acceptance checks. |
 | C13 | `git log -1 --format=%h --grep="^fix(ui): complete recovery screens and mobile workflows$"` | Client lint/typecheck; targeted stack tests for policy/404, mobile editor/dialog controls, and the three editor navigation/typing regressions. | Passed. Policy content is prepared for operator/legal review and is not marked as final terms or privacy advice. |
 | C14 | `git log -1 --format=%h --grep="^chore(server): prepare a reproducible VPS runtime$"` | Docker image build/inspection, migration job, health checks, and Nginx API/cookie/WebSocket smoke test. | Not run: Docker-compatible tooling is unavailable in this environment. Production files and instructions are committed for host-side verification; C14 remains unchecked. |
+| C15 | `git log -1 --format=%h --grep="^chore(client): configure Vercel builds and production URLs$"` | `VITE_API_BASE_URL=https://api.example.com VITE_WS_URL=wss://api.example.com/ws npm run build --workspace @collab/client`; verified built JS values, `service-worker.js`, and Vite preview for root/signin/editor/profile/trash deep links. | Passed locally. Browserslist data and >500 kB editor-vendor chunk warnings remain. Real Vercel domain/TLS/OAuth/cross-host cookie and WebSocket acceptance occurs after deployment. |
 | C00 | `a083302` | Documentation links, 18 commit entries, ignore exceptions, and staged whitespace/scope review. | Passed; earlier application edits excluded. |
 | C01 | `049d62c` | Fresh `npm ci --no-audit --no-fund`; lint; typecheck for all three workspaces; 13 helper tests; production builds. | Passed on Node 22.20.0. Six existing Fast Refresh warnings, stale Browserslist data, and editor bundle size warning remain. Sandbox blocked esbuild; the build passed with process execution allowed. |
 | C02 | This migration commit; resolve with `git log -1 --format=%h --grep="^fix(db): make migrations standalone and coordinated$"`. | `npm run ci:check`; `npm run test:migrations --workspace server` against the disposable localhost PostgreSQL cluster; documentation links and staged scope/whitespace review. | Passed on Node 22.20.0 and PostgreSQL 18.1: 13 helper tests plus 9 database regressions. Covers production startup refusing pending schema, fresh/status/repeat/concurrent runs, SQL/tracking rollback and retry, asset errors, prerequisite ordering, upgrade preservation, and CLI exit. Corrected the compiled backend/CLI layout and shared runtime imports. Existing SQL files unchanged. CI configured for disposable PostgreSQL 16; remote CI has not been run. |
