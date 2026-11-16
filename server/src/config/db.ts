@@ -1,9 +1,14 @@
 import { Pool } from "pg";
 import { env } from "./env.js";
+import { logger } from "../utils/logger.js";
 
 const dbConfig = env.databaseUrl ? { connectionString: env.databaseUrl } : {};
 
 export const db = new Pool(dbConfig);
+db.on("error", (error) => {
+  const databaseError = error as Error & { code?: string };
+  logger.error("Unexpected idle database client error", { message: databaseError.message, code: databaseError.code });
+});
 
 export const checkDatabaseConnection = async (): Promise<boolean> => {
   try {

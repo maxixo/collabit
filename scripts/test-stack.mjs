@@ -119,6 +119,7 @@ try {
   const app = `http://127.0.0.1:${appPort}`;
   const env = {
     ...process.env, NODE_ENV: 'test', PORT: String(apiPort), DATABASE_URL: connection.toString(),
+    API_DOCUMENT_RATE_LIMIT: '10000',
     AUTH_SECRET: 'isolated-test-stack-secret-more-than-32-characters', JWT_SECRET: 'isolated-test-stack-jwt-more-than-32-characters',
     AUTH_BASE_URL: api, CORS_ORIGINS: app, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '',
     VITE_API_BASE_URL: api, VITE_WS_URL: `ws://127.0.0.1:${apiPort}/ws`,
@@ -139,6 +140,43 @@ try {
   await Promise.all([ready(`${api}/ready`, backend), ready(app, frontend)]);
   console.info('Fresh database and application servers ready. Running browser/API checks...');
   await run([process.env.npm_execpath, 'run', 'test:e2e', '--workspace', 'client', '--', ...process.argv.slice(2).filter((arg) => !['--reuse-server-build', '--with-migrations'].includes(arg))], root, env, 'playwright');
+  if (cluster?.started) {
+    const restoreName = `mvp_restore_${randomUUID().replaceAll('-', '')}`;
+    const backupPath = path.join(cluster.directory, 'acceptance-backup.dump');
+    await admin.query(`CREATE DATABASE "${restoreName}"`);
+    const restoreUrl = new URL(connection.toString());
+    restoreUrl.pathname = `/${restoreName}`;
+    const sourcePool = new Pool({ connectionString: connection.toString() });
+    const restoredPool = new Pool({ connectionString: restoreUrl.toString() });
+    try {
+      await native(path.join(cluster.bin, 'pg_dump'), ['--format=custom', '--no-owner', '--no-acl', '--file', backupPath, '--dbname', connection.toString()]);
+      await native(path.join(cluster.bin, 'pg_restore'), ['--exit-on-error', '--single-transaction', '--no-owner', '--no-acl', '--dbname', restoreUrl.toString(), backupPath]);
+      for (const table of ['user', 'documents', 'document_members', 'document_versions', 'document_suggestions']) {
+        const sourceRows = await sourcePool.query(`SELECT count(*)::int AS count FROM "${table}"`);
+        const restoredRows = await restoredPool.query(`SELECT count(*)::int AS count FROM "${table}"`);
+        if (sourceRows.rows[0].count !== restoredRows.rows[0].count)
+          throw new Error(`Backup restore row count differs for ${table}`);
+      }
+      console.info('Custom-format database backup restored into a disposable database; core row counts match.');
+    } finally {
+      await sourcePool.end();
+      await restoredPool.end();
+      await admin.query(`DROP DATABASE "${restoreName}" WITH (FORCE)`);
+    }
+
+    await admin.query(`DROP DATABASE "${database}" WITH (FORCE)`);
+    created = false;
+    await admin.end();
+    admin = undefined;
+    await native(path.join(cluster.bin, 'pg_ctl'), ['-D', path.join(cluster.directory, 'data'), '-m', 'fast', '-w', 'stop']);
+    cluster.started = false;
+    const [liveness, readiness] = await Promise.all([fetch(`${api}/health`), fetch(`${api}/ready`)]);
+    if (liveness.status !== 200 || readiness.status !== 503)
+      throw new Error(`Database outage should retain liveness and fail readiness (health=${liveness.status}, ready=${readiness.status})`);
+    console.info('Database outage keeps liveness healthy and returns 503 from readiness.');
+  } else {
+    console.info('Skipping local backup/restore and database-outage rehearsals: this run does not own its PostgreSQL server.');
+  }
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

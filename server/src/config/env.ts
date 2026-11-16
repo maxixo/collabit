@@ -57,6 +57,7 @@ const headersTimeoutMs = Math.max(
 );
 const shutdownTimeoutMs = parsePositiveInt(process.env.SHUTDOWN_TIMEOUT_MS, 10_000);
 const websocketMaxPayloadBytes = parsePositiveInt(process.env.WS_MAX_PAYLOAD_BYTES, 1_048_576);
+const documentApiRateLimit = parsePositiveInt(process.env.API_DOCUMENT_RATE_LIMIT, 180);
 
 export const env = {
   nodeEnv,
@@ -81,7 +82,8 @@ export const env = {
   requestTimeoutMs,
   headersTimeoutMs,
   shutdownTimeoutMs,
-  websocketMaxPayloadBytes
+  websocketMaxPayloadBytes,
+  documentApiRateLimit
 };
 
 if (env.isProduction) {

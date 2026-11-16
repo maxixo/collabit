@@ -59,7 +59,7 @@ export const createApp = () => {
       documentWindows.set(key, window);
     }
     window.count++;
-    if (window.count > 180) {
+    if (window.count > env.documentApiRateLimit) {
       res.setHeader("Retry-After", "60");
       res.status(429).json({ message: "Document API rate limit exceeded" });
       return;
