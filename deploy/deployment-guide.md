@@ -80,7 +80,7 @@ Run these checks after each production deployment and before opening signup to t
 - If enabled, test Google OAuth through the registered callback.
 - Open a document in two independent browser sessions, edit simultaneously, and verify the WebSocket uses `wss://api.example.com/ws/...` and changes converge.
 - Verify `/health` and `/ready`, inspect redacted backend logs, and verify an off-host database backup can be restored into a disposable PostgreSQL database.
-- Keep public signup disabled or clearly gated if SMTP, account recovery, cookie/session behavior, or WebSocket collaboration has not passed.
+- Do not open production traffic until SMTP, account recovery, cookie/session behavior, and WebSocket collaboration have passed. This repository currently has no environment-based switch to disable signup; keep the production deployment protected or unattached to the public domain while those checks are outstanding.
 
 ## 6. Release and rollback sequence
 

@@ -26,6 +26,8 @@ For Vercel project settings, public frontend environment variables, DNS/OAuth co
 
 For health checks, redacted logs, encrypted backup scheduling, disposable restore rehearsal, restart, and rollback procedures, see the [backend operations runbook](server/ops-runbook.md).
 
+See the [release acceptance record](deploy/release-acceptance.md) for the latest verified gates and the remaining deployment prerequisites.
+
 
 ## Local Development
 
