@@ -1,9 +1,13 @@
-import { randomUUID } from "crypto";
+import { mutateDocument, requireMutationGuard } from "../services/documentMutation.service.js";
+import { closeDocumentRoom, mergeDocumentUpdate } from "../collaboration/documentRooms.js";
+import { getYjsManager } from "../collaboration/yjsServer.js";
+import { createHash, randomUUID } from "crypto";
 import { Router, type Response } from "express";
 import type { ShareTokenOptions } from "@shared/types.js";
 import type { DocumentModel } from "../models/document.model.js";
 import { authMiddleware, type AuthenticatedRequest } from "../middlewares/auth.middleware.js";
 import { logger } from "../utils/logger.js";
+import { env } from "../config/env.js";
 import {
   autoJoinDocumentViaShare,
   createDocument,
@@ -16,14 +20,11 @@ import {
   moveToTrash,
   permanentlyDeleteDocument,
   restoreFromTrash,
-  toggleStarDocument,
-  updateDocument,
+  setStarDocument,
   validateDocumentAccessWithShare
 } from "../services/document.service.js";
 import {
-  getPendingChanges,
-  markAllChangesApplied,
-  markChangesApplied
+  getPendingChanges
 } from "../services/changeEvent.service.js";
 import {
   acceptSuggestions,
@@ -35,21 +36,27 @@ import {
   resolveSuggestionsByAuthor
 } from "../services/suggestion.service.js";
 import { canEditDocument, getDocumentRole } from "../services/permission.service.js";
+import { listDocumentMembers, removeDocumentMember, updateDocumentMemberRole } from "../services/documentMember.service.js";
 import {
   generateShareToken,
   getShareTokenByToken,
-  incrementTokenUsage,
   listActiveShareTokens,
   revokeShareToken,
   validateShareToken
 } from "../services/shareToken.service.js";
 import {
-  getDocumentVersions,
-  restoreDocumentVersion,
-  createDocumentVersion
+  getDocumentVersions
 } from "../services/documentVersion.service.js";
 
 export const documentRoutes = Router();
+documentRoutes.param("id", (req, res, next, value) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) { res.status(400).json({ message: "Invalid document ID" }); return; }
+  next();
+});
+documentRoutes.param("memberId", (_req, res, next, value) => {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) { res.status(400).json({ message: "Invalid member ID" }); return; }
+  next();
+});
 
 const DEFAULT_DOCUMENT_CONTENT = {
   type: "doc",
@@ -57,6 +64,20 @@ const DEFAULT_DOCUMENT_CONTENT = {
 };
 
 const SHARE_PERMISSION_LEVELS = new Set(["viewer", "editor", "owner"]);
+const isValidDocumentJson = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value) || (value as { type?: unknown }).type !== "doc") return false;
+  let count = 0;
+  const visit = (node: unknown, depth: number): boolean => {
+    if (++count > 20_000 || depth > 32 || !node || typeof node !== "object") return false;
+    if (Array.isArray(node)) return node.length <= 10_000 && node.every((child) => visit(child, depth + 1));
+    return Object.entries(node).every(([key, child]) => key.length <= 128 &&
+      (typeof child === "string" ? child.length <= 200_000 : child === null || typeof child === "boolean" ||
+        (typeof child === "number" && Number.isFinite(child)) || visit(child, depth + 1)));
+  };
+  try { return visit(value, 0) && Buffer.byteLength(JSON.stringify(value), "utf8") <= 512_000; }
+  catch { return false; }
+};
+const validTitle = (title: unknown) => typeof title === "string" && title.trim().length > 0 && title.trim().length <= 200;
 
 const requireUserId = (req: AuthenticatedRequest, res: Response): string | null => {
   const userId = req.user?.id;
@@ -88,13 +109,9 @@ documentRoutes.get("/share/:token", async (req, res, next) => {
       return;
     }
 
-    const updatedToken = await incrementTokenUsage(token);
-    if (!updatedToken) {
-      res.status(410).json({ message: "Share token is no longer valid" });
-      return;
-    }
-
-    res.json({ shareToken: updatedToken });
+    // Looking up a link is not a redemption. Usage is charged when a new
+    // authenticated member is actually added by autoJoinDocumentViaShare.
+    res.json({ shareToken: validation.token });
   } catch (error) {
     next(error);
   }
@@ -208,7 +225,7 @@ documentRoutes.get("/:id/share-tokens", async (req: AuthenticatedRequest, res, n
       return;
     }
     const role = await getDocumentRole(userId, req.params.id, workspaceId);
-    if (!canEditDocument(role)) {
+    if (role !== "owner") {
       res.status(403).json({ message: "Access denied" });
       return;
     }
@@ -245,7 +262,7 @@ documentRoutes.delete("/share/:token", async (req: AuthenticatedRequest, res, ne
       return;
     }
     const role = await getDocumentRole(userId, shareToken.documentId, workspaceId);
-    if (!canEditDocument(role)) {
+    if (role !== "owner") {
       res.status(403).json({ message: "Access denied" });
       return;
     }
@@ -256,10 +273,61 @@ documentRoutes.delete("/share/:token", async (req: AuthenticatedRequest, res, ne
       return;
     }
 
+    getYjsManager().disconnectGuests(shareToken.documentId);
+
     res.json({ token, revoked: true });
   } catch (error) {
     next(error);
   }
+});
+
+documentRoutes.get("/:id/members", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    if (!workspaceId) { res.status(400).json({ message: "workspaceId is required" }); return; }
+    if (await getDocumentRole(userId, req.params.id, workspaceId) !== "owner") {
+      res.status(403).json({ message: "Access denied" }); return;
+    }
+    res.json({ members: await listDocumentMembers(req.params.id, workspaceId) });
+  } catch (error) { next(error); }
+});
+
+documentRoutes.patch("/:id/members/:memberId", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    if (!workspaceId) { res.status(400).json({ message: "workspaceId is required" }); return; }
+    if (await getDocumentRole(userId, req.params.id, workspaceId) !== "owner") {
+      res.status(403).json({ message: "Access denied" }); return;
+    }
+    const role = req.body?.role;
+    if (role !== "viewer" && role !== "editor") {
+      res.status(400).json({ message: "role must be viewer or editor" }); return;
+    }
+    const member = await updateDocumentMemberRole(req.params.id, workspaceId, req.params.memberId, role);
+    if (!member) { res.status(404).json({ message: "Collaborator not found" }); return; }
+    getYjsManager().disconnectUser(req.params.id, member.userId);
+    res.json({ member });
+  } catch (error) { next(error); }
+});
+
+documentRoutes.delete("/:id/members/:memberId", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    if (!workspaceId) { res.status(400).json({ message: "workspaceId is required" }); return; }
+    if (await getDocumentRole(userId, req.params.id, workspaceId) !== "owner") {
+      res.status(403).json({ message: "Access denied" }); return;
+    }
+    const removed = await removeDocumentMember(req.params.id, workspaceId, req.params.memberId);
+    if (!removed) { res.status(404).json({ message: "Collaborator not found" }); return; }
+    getYjsManager().disconnectUser(req.params.id, req.params.memberId);
+    res.json({ removed: true, userId: req.params.memberId });
+  } catch (error) { next(error); }
 });
 
 documentRoutes.post("/", async (req: AuthenticatedRequest, res, next) => {
@@ -270,6 +338,8 @@ documentRoutes.post("/", async (req: AuthenticatedRequest, res, next) => {
       content?: Record<string, unknown>;
       workspaceId?: string;
     };
+    if (title !== undefined && !validTitle(title)) { res.status(400).json({ message: "title must contain 1 to 200 characters" }); return; }
+    if (content !== undefined && !isValidDocumentJson(content)) { res.status(400).json({ message: "content must be a valid bounded document JSON object" }); return; }
 
     if (!workspaceId) {
       res.status(400).json({ message: "workspaceId is required" });
@@ -293,7 +363,8 @@ documentRoutes.post("/", async (req: AuthenticatedRequest, res, next) => {
       updatedAt: new Date().toISOString(),
       ownerId: userId,
       workspaceId,
-      isStarred: false
+      isStarred: false,
+      revision: 0
     };
 
     try {
@@ -552,11 +623,32 @@ documentRoutes.patch("/:id/star", async (req: AuthenticatedRequest, res, next) =
       return;
     }
 
-    const result = await toggleStarDocument(req.params.id, userId);
+    if (typeof req.body.isStarred !== "boolean") {
+      res.status(400).json({ message: "isStarred must be a boolean" }); return;
+    }
+    const result = await setStarDocument(req.params.id, userId, req.body.isStarred);
     res.json({ documentId: req.params.id, isStarred: result.isStarred });
   } catch (error) {
     next(error);
   }
+});
+
+documentRoutes.patch("/:id/sync", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const userId = req.user?.id ?? "";
+    const access = await validateDocumentAccessWithShare(req.params.id, userId, req.shareToken);
+    if (!access.allowed || !canEditDocument(access.role)) { res.status(403).json({ message: "Access denied" }); return; }
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : access.workspaceId;
+    if (workspaceId !== access.workspaceId) { res.status(404).json({ message: "Document not found" }); return; }
+    const update = req.body.yjsUpdate;
+    if (!Array.isArray(update) || !update.length || update.length > env.websocketMaxPayloadBytes || !update.every((value: unknown) => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 255)) {
+      res.status(400).json({ message: "yjsUpdate must be an array of bytes" }); return;
+    }
+    await mergeDocumentUpdate(req.params.id, new Uint8Array(update), undefined, true);
+    const document = await getDocumentById(req.params.id, workspaceId, userId, { bypassAccessCheck: access.source === "share" });
+    await closeDocumentRoom(req.params.id, () => getYjsManager().getClientCount(req.params.id) > 0);
+    res.json({ document });
+  } catch (error) { next(error); }
 });
 
 documentRoutes.patch("/:id", async (req: AuthenticatedRequest, res, next) => {
@@ -567,6 +659,8 @@ documentRoutes.patch("/:id", async (req: AuthenticatedRequest, res, next) => {
       title?: string;
       content?: Record<string, unknown>;
     };
+    if (title !== undefined && !validTitle(title)) { res.status(400).json({ message: "title must contain 1 to 200 characters" }); return; }
+    if (content !== undefined && !isValidDocumentJson(content)) { res.status(400).json({ message: "content must be a valid bounded document JSON object" }); return; }
 
     const userId = req.user?.id ?? "";
     const shareToken = req.shareToken;
@@ -595,17 +689,11 @@ documentRoutes.patch("/:id", async (req: AuthenticatedRequest, res, next) => {
       return;
     }
 
-    const updated = await updateDocument({
-      id: req.params.id,
-      workspaceId,
-      title: title?.trim(),
-      content
+    const { document: updated } = await mutateDocument({
+      ...requireMutationGuard(req.body), documentId: req.params.id, workspaceId,
+      actorId: userId || "share:" + createHash("sha256").update(shareToken ?? "").digest("hex"),
+      kind: "update", title: title?.trim(), content
     });
-
-    if (!updated) {
-      res.status(404).json({ message: "Document not found" });
-      return;
-    }
 
     if (access.source === "share" && access.shareToken && userId) {
       await autoJoinDocumentViaShare(
@@ -894,17 +982,18 @@ documentRoutes.post("/:id/restore", async (req: AuthenticatedRequest, res, next)
       return;
     }
 
-    const restoredContent = await restoreDocumentVersion(
-      req.params.id,
-      versionNumber,
-      workspaceId
-    );
+    const { document: restored } = await mutateDocument({
+      ...requireMutationGuard(req.body), documentId: req.params.id, workspaceId,
+      actorId: userId || "share:" + createHash("sha256").update(shareToken ?? "").digest("hex"),
+      kind: "restore", versionNumber
+    });
 
     res.json({
       documentId: req.params.id,
       versionNumber,
       restored: true,
-      content: restoredContent,
+      content: restored.content,
+      document: restored,
       message: `Document restored to version ${versionNumber}`
     });
   } catch (error) {
@@ -954,61 +1043,16 @@ documentRoutes.post("/:id/save", async (req: AuthenticatedRequest, res, next) =>
       content?: Record<string, unknown>;
     };
 
-    let appliedCount = 0;
-    if (applyPendingChanges) {
-      if (specificUserChanges && specificUserChanges.length > 0) {
-        // Apply specific user's changes
-        for (const targetUserId of specificUserChanges) {
-          const count = await markChangesApplied(req.params.id, targetUserId, workspaceId);
-          appliedCount += count;
-        }
-      } else {
-        // Apply all pending changes
-        appliedCount = await markAllChangesApplied(req.params.id, workspaceId);
-      }
-    }
-
-    let versionSourceDocument = await getDocumentById(req.params.id, workspaceId, userId);
-    if (!versionSourceDocument) {
-      res.status(404).json({ message: "Document not found" });
-      return;
-    }
-
-    if (typeof title !== "undefined" || typeof content !== "undefined") {
-      const updated = await updateDocument({
-        id: req.params.id,
-        workspaceId,
-        title: title?.trim(),
-        content
-      });
-
-      if (!updated) {
-        res.status(404).json({ message: "Document not found" });
-        return;
-      }
-      versionSourceDocument = updated;
-    }
-
-    if (access.source === "share" && access.shareToken && userId) {
-      await autoJoinDocumentViaShare(
-        req.params.id,
-        userId,
-        access.shareToken.token,
-        access.shareToken.permissionLevel
-      );
-    }
-
-    const version = await createDocumentVersion(
-      versionSourceDocument.id,
-      versionSourceDocument.title,
-      versionSourceDocument.content,
-      userId,
-      workspaceId
-    );
+    const { document, version, appliedChanges: appliedCount } = await mutateDocument({
+      ...requireMutationGuard(req.body), documentId: req.params.id, workspaceId, actorId: userId,
+      kind: "save", title: title?.trim(), content, applyPendingChanges, specificUserChanges
+    });
+    if (!version) throw new Error("Version save did not create a version");
 
     res.json({
       documentId: req.params.id,
       saved: true,
+      document,
       versionNumber: version.versionNumber,
       versionCreatedAt: version.createdAt,
       versionCreatedBy: version.createdBy,

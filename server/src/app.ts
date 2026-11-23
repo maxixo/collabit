@@ -9,9 +9,11 @@ import { workspaceRoutes } from "./api/workspace.routes.js";
 import { db } from "./config/db.js";
 import { env } from "./config/env.js";
 import { errorMiddleware } from "./middlewares/error.middleware.js";
+import { isDraining } from "./serverState.js";
 
 export const createApp = () => {
   const app = express();
+  const documentWindows = new Map<string, { start: number; count: number }>();
   const allowAnyOrigin = !env.isProduction && env.corsOrigins.length === 0;
 
   app.disable("x-powered-by");
@@ -39,6 +41,35 @@ export const createApp = () => {
   app.use(express.json({ limit: env.apiBodyLimit }));
   app.use(express.urlencoded({ extended: false, limit: env.apiBodyLimit }));
 
+  app.use((req, res, next) => {
+    if (isDraining() && (req.path === "/ready" || req.path.startsWith("/api/"))) {
+      res.status(503).json({ status: "draining" });
+      return;
+    }
+    next();
+  });
+
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api/documents")) { next(); return; }
+    const now = Date.now();
+    const key = req.ip || req.socket.remoteAddress || "unknown";
+    let window = documentWindows.get(key);
+    if (!window || now - window.start >= 60_000) {
+      window = { start: now, count: 0 };
+      documentWindows.set(key, window);
+    }
+    window.count++;
+    if (window.count > env.documentApiRateLimit) {
+      res.setHeader("Retry-After", "60");
+      res.status(429).json({ message: "Document API rate limit exceeded" });
+      return;
+    }
+    if (documentWindows.size > 10_000) {
+      for (const [ip, value] of documentWindows) if (now - value.start >= 60_000) documentWindows.delete(ip);
+    }
+    next();
+  });
+
   app.get("/", (_req, res) => {
     res.json({
       service: "collab-api",
@@ -52,6 +83,7 @@ export const createApp = () => {
   });
 
   app.get("/ready", async (_req, res) => {
+    if (isDraining()) { res.status(503).json({ status: "draining" }); return; }
     try {
       await db.query("SELECT 1");
       res.json({ status: "ready" });

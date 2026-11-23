@@ -4,6 +4,7 @@ import {
   validateProfileUpdatePayload
 } from "../api/profile.validation.ts";
 import { formatWorkspaceDisplayName } from "../services/workspace.naming.ts";
+import { sanitizeLogContext } from "../utils/logger.ts";
 
 const tests: Array<{ name: string; run: () => void }> = [
   {
@@ -60,6 +61,25 @@ const tests: Array<{ name: string; run: () => void }> = [
         formatWorkspaceDisplayName("client_success_ops"),
         "Client Success Ops"
       );
+    }
+  },
+  {
+    name: "log context redacts credentials, emails, and document payloads",
+    run: () => {
+      assert.deepEqual(sanitizeLogContext({
+        password: "do-not-log",
+        email: "person@example.com",
+        documentId: "doc-123",
+        body: "private document",
+        authorization: "Bearer private-token"
+      }), {
+        password: "[REDACTED]",
+        email: "[REDACTED]",
+        documentId: "doc-123",
+        body: "[REDACTED]",
+        authorization: "[REDACTED]"
+      });
+      assert.equal(sanitizeLogContext("token=private-token"), "token=[REDACTED]");
     }
   }
 ];

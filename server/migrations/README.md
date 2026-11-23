@@ -52,6 +52,8 @@ Older runners could execute SQL and fail before recording it. If such partial st
 
 ## Regression tests
 
+Migration 009 adds a revision counter to every existing document (starting at zero) and an actor-scoped mutation receipt ledger. Existing content and history remain intact. Upgrade the API and frontend together: old clients without an expected revision and mutation UUID receive HTTP 428. The schema is additive, but rolling back to old writers would bypass revision checks and receipts. Stop writes before any rollback, export unresolved local drafts, and prefer a compatible forward fix. Receipts are retained with the document and removed by its foreign-key cascade; do not prune them during the retry window.
+
 Build the backend first, then set `MIGRATION_TEST_DATABASE_URL` to a **local disposable PostgreSQL admin connection** and run:
 
 ```sh

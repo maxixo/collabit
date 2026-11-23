@@ -3,7 +3,7 @@ import { actions, useAppStore } from "../app/store";
 import { flushStarQueue } from "../offline/starQueue";
 import { updateCachedDocumentStar } from "../offline/indexedDb";
 import { syncOnReconnect } from "../offline/syncOnReconnect";
-import { toggleStarDocument } from "../services/document.service";
+import { setStarDocument } from "../services/document.service";
 import { emitStarUpdate, subscribeToStarUpdates } from "../utils/starEvents";
 import { useAuth } from "../auth/AuthContext";
 
@@ -33,8 +33,8 @@ export const useStarSync = () => {
   }, [applyStarUpdate]);
 
   const flushQueue = useCallback(async () => {
-    await flushStarQueue(async ({ documentId, workspaceId }) => {
-      const result = await toggleStarDocument(documentId, workspaceId);
+    await flushStarQueue(async ({ documentId, workspaceId, isStarred }) => {
+      const result = await setStarDocument(documentId, workspaceId, isStarred);
       applyStarUpdate(result.documentId, result.isStarred);
       emitStarUpdate({
         documentId: result.documentId,

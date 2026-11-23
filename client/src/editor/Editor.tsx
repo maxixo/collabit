@@ -3,6 +3,8 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor as TipTapEditor, JSONContent } from "@tiptap/core";
 import type { DocumentSuggestion, SuggestionMetadata } from "@shared/types";
 import { ySyncPluginKey } from "y-prosemirror";
+import * as Y from "yjs";
+import type { DocumentDetail } from "../services/document.service";
 import { createEditorExtensions } from "./editorConfig";
 import { Toolbar } from "./Toolbar";
 import { destroyYjsProvider, getYjsProvider, type YjsProvider } from "../collaboration/yjsProvider";
@@ -117,9 +119,10 @@ type EditorSurfaceProps = {
   contentVersion?: number;
   editable: boolean;
   hideToolbar?: boolean;
-  onChange: (content: JSONContent) => void;
+  onChange: (content: JSONContent, yjsUpdate?: number[]) => void;
+  onDurableDocument?: (document: DocumentDetail) => void;
   docTitle: string;
-  onTitleChange: (title: string) => void;
+  onTitleChange: (title: string, yjsUpdate?: number[]) => void;
   onStatsChange?: (stats: EditorStats) => void;
   onYjsUpdate?: (content: JSONContent) => void;
   onCursorUpdate?: (position: number, range?: { from: number; to: number }) => void;
@@ -128,6 +131,7 @@ type EditorSurfaceProps = {
   autoFocusTitle?: boolean;
   loading?: boolean;
   error?: string | null;
+  onRetryLoad?: () => void;
   shareToken?: string | null;
   suggestions?: DocumentSuggestion[];
   canReviewSuggestions?: boolean;
@@ -149,6 +153,7 @@ export const EditorSurface = ({
   editable,
   hideToolbar = false,
   onChange,
+  onDurableDocument,
   onTitleChange,
   onStatsChange,
   onYjsUpdate,
@@ -159,6 +164,7 @@ export const EditorSurface = ({
   docTitle,
   loading = false,
   error = null,
+  onRetryLoad,
   shareToken = null,
   suggestions = [],
   canReviewSuggestions = false,
@@ -226,6 +232,19 @@ export const EditorSurface = ({
   const onChangeRef = useRef(onChange);
   const lastHydratedKey = useRef<string | null>(null);
   const hydratedEditor = useRef<TipTapEditor | null>(null);
+  const [roomReady, setRoomReady] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const durableCallback = useRef(onDurableDocument);
+  durableCallback.current = onDurableDocument;
+  useEffect(() => {
+    setRoomReady(provider?.isReady() ?? false);
+    setRoomError(null);
+    return provider?.subscribe((state) => {
+      setRoomReady(state.ready);
+      if (state.error) setRoomError(state.error); else if (state.document) setRoomError(null);
+      if (state.document) durableCallback.current?.(state.document);
+    });
+  }, [provider]);
 
   const debouncedCursorUpdate = useMemo(
     () =>
@@ -439,7 +458,9 @@ export const EditorSurface = ({
         // Editor creation/reconfiguration must never enqueue an empty initialization snapshot.
         if (hydratedEditor.current !== editorInstance || loading || error || !transaction.docChanged) return;
         const nextContent = editorInstance.getJSON() as JSONContent;
-        onChangeRef.current(nextContent);
+        const origin = transaction.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined;
+        if (!origin?.isChangeOrigin)
+          onChangeRef.current(nextContent, provider ? Array.from(Y.encodeStateAsUpdate(provider.doc)) : undefined);
         updateStats(editorInstance);
 
         const syncMeta = transaction.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined;
@@ -563,6 +584,13 @@ export const EditorSurface = ({
     if (loading || error) {
       return;
     }
+    if (collaborationEnabled) {
+      if (!provider || !roomReady) return;
+      hydratedEditor.current = safeEditor;
+      lastHydratedKey.current = hydrationKey;
+      updateStats(safeEditor);
+      return;
+    }
     if (lastHydratedKey.current === hydrationKey) {
       return;
     }
@@ -589,7 +617,7 @@ export const EditorSurface = ({
     safeEditor.commands.focus("end");
     lastHydratedKey.current = hydrationKey;
     updateStats(safeEditor);
-  }, [safeEditor, content, documentId, contentVersion, loading, error, updateStats, clearSuggestionHideTimeout]);
+  }, [safeEditor, content, documentId, contentVersion, loading, error, updateStats, clearSuggestionHideTimeout, collaborationEnabled, provider, roomReady]);
 
   useEffect(() => {
     if (!safeEditor) {
@@ -600,9 +628,9 @@ export const EditorSurface = ({
 
   useEffect(() => {
     if (safeEditor) {
-      safeEditor.setEditable(editable, false);
+      safeEditor.setEditable(editable && (!collaborationEnabled || roomReady), false);
     }
-  }, [safeEditor, editable]);
+  }, [safeEditor, editable, collaborationEnabled, roomReady]);
 
   useEffect(() => {
     if (!syncManager) {
@@ -840,9 +868,11 @@ export const EditorSurface = ({
       </div>
 
       <div
-        className="relative mx-auto my-12 min-h-[1000px] max-w-[800px] bg-white p-24 text-[#0d0e1b] dark:text-[#0d0e1b]"
+        className="relative mx-auto my-4 min-h-[calc(100vh-10rem)] w-full max-w-[800px] bg-white p-4 text-[#0d0e1b] dark:text-[#0d0e1b] sm:my-8 sm:p-8 md:my-12 md:min-h-[1000px] md:p-24"
         data-testid="editor-surface"
       >
+        {roomError && <p role="alert" className="mb-4 text-sm text-rose-700">{roomError}</p>}
+        {collaborationEnabled && !roomReady && <p role="status" className="mb-4 text-sm">Loading shared document…</p>}
         <article className="max-w-none">
           <div className="mb-8">
             <label className="sr-only" htmlFor="document-title">
@@ -854,10 +884,14 @@ export const EditorSurface = ({
               ref={titleInputRef}
               value={docTitle}
               placeholder="Untitled document"
-              readOnly={!editable}
-              aria-disabled={!editable}
+              readOnly={!editable || (collaborationEnabled && !roomReady)}
+              aria-disabled={!editable || (collaborationEnabled && !roomReady)}
               data-testid="editor-title-input"
-              onChange={(event) => onTitleChange(event.target.value)}
+              onChange={(event) => {
+                const title = event.target.value;
+                if (provider) provider.doc.getMap("metadata").set("title", title);
+                onTitleChange(title, provider ? Array.from(Y.encodeStateAsUpdate(provider.doc)) : undefined);
+              }}
               onKeyDown={handleTitleKeyDown}
             />
           </div>
@@ -994,9 +1028,12 @@ export const EditorSurface = ({
             </div>
           ) : null}
           {loading ? (
-            <p className="text-base text-[#4c4d9a] dark:text-[#8a8bbd]">Loading document...</p>
+            <p role="status" className="text-base text-[#4c4d9a] dark:text-[#8a8bbd]">Loading document...</p>
           ) : error ? (
-            <p className="text-base text-red-500">{error}</p>
+            <div role="alert" className="space-y-3 text-red-700">
+              <p>{error}</p>
+              {onRetryLoad ? <button className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold hover:bg-red-50" type="button" onClick={onRetryLoad}>Try loading again</button> : null}
+            </div>
           ) : safeEditor && documentId ? (
             <div className="relative" data-testid="editor-content">
               <EditorContent editor={safeEditor} className="tiptap text-lg leading-relaxed [&_[data-suggestion-id]]:cursor-pointer [&_.suggestion-decoration]:rounded-[0.35rem] [&_.suggestion-decoration]:px-0.5 [&_.suggestion-decoration]:text-[#2a2150] [&_.suggestion-decoration-insert]:bg-[#d6c8ff] [&_.suggestion-decoration-insert]:shadow-[inset_0_-1px_0_rgba(139,92,246,0.25)] [&_.suggestion-decoration-replace]:bg-[#cfe6ff] [&_.suggestion-decoration-replace]:shadow-[inset_0_-1px_0_rgba(59,130,246,0.25)] [&_.suggestion-decoration-delete-widget]:mx-1 [&_.suggestion-decoration-delete-widget]:inline-flex [&_.suggestion-decoration-delete-widget]:items-center [&_.suggestion-decoration-delete-widget]:rounded-full [&_.suggestion-decoration-delete-widget]:border [&_.suggestion-decoration-delete-widget]:border-rose-300 [&_.suggestion-decoration-delete-widget]:bg-rose-50 [&_.suggestion-decoration-delete-widget]:px-2 [&_.suggestion-decoration-delete-widget]:py-0.5 [&_.suggestion-decoration-delete-widget]:text-xs [&_.suggestion-decoration-delete-widget]:font-medium [&_.suggestion-decoration-delete-widget]:text-rose-700 [&_.suggestion-decoration-delete-widget]:line-through" />

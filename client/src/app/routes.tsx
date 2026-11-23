@@ -6,6 +6,11 @@ import { useAuth } from "../auth/AuthContext";
 const LandingPage = lazy(() => import("../pages/Landing").then((module) => ({ default: module.Landing })));
 const SignInPage = lazy(() => import("../pages/SignIn").then((module) => ({ default: module.SignIn })));
 const SignUpPage = lazy(() => import("../pages/SignUp").then((module) => ({ default: module.SignUp })));
+const ForgotPasswordPage = lazy(() => import("../pages/ForgotPassword").then((module) => ({ default: module.ForgotPassword })));
+const ResetPasswordPage = lazy(() => import("../pages/ResetPassword").then((module) => ({ default: module.ResetPassword })));
+const NotFoundPage = lazy(() => import("../pages/NotFound").then((module) => ({ default: module.NotFound })));
+const PrivacyPolicyPage = lazy(() => import("../pages/PolicyPage").then((module) => ({ default: module.PrivacyPolicy })));
+const TermsOfServicePage = lazy(() => import("../pages/PolicyPage").then((module) => ({ default: module.TermsOfService })));
 const AuthCallbackPage = lazy(() => import("../pages/AuthCallback").then((module) => ({ default: module.AuthCallback })));
 const EditorPage = lazy(() => import("../pages/Editor").then((module) => ({ default: module.Editor })));
 const RecentPage = lazy(() => import("../pages/Recent").then((module) => ({ default: module.Recent })));
@@ -137,7 +142,27 @@ export const router = createBrowserRouter([
     element: withSuspense(SignUpPage)
   },
   {
+    path: "/auth/forgot-password",
+    element: withSuspense(ForgotPasswordPage)
+  },
+  {
+    path: "/auth/reset-password",
+    element: withSuspense(ResetPasswordPage)
+  },
+  {
     path: "/auth/callback",
     element: withSuspense(AuthCallbackPage)
+  },
+  {
+    path: "/privacy",
+    element: withSuspense(PrivacyPolicyPage)
+  },
+  {
+    path: "/terms",
+    element: withSuspense(TermsOfServicePage)
+  },
+  {
+    path: "*",
+    element: withSuspense(NotFoundPage)
   }
 ]);

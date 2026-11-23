@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
+import { useModalAccessibility } from "../hooks/useModalAccessibility";
 
 interface PendingChangeSummary {
   userId: string;
@@ -39,6 +40,8 @@ export const SaveConfirmationModal = ({
   onCancel,
   isSaving = false
 }: SaveConfirmationModalProps) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalAccessibility(dialogRef, isOpen, onCancel);
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
 
@@ -120,7 +123,12 @@ export const SaveConfirmationModal = ({
       onClick={onCancel}
     >
       <div
-        className="mx-4 w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#16172d]"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Save document version"
+        tabIndex={-1}
+        className="mx-4 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl dark:bg-[#16172d]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#e7e7f3] bg-[#f8f8fc] px-6 py-4 dark:border-[#2a2b4a] dark:bg-[#1e1f3a]">

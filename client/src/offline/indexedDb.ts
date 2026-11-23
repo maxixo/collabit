@@ -74,7 +74,7 @@ export const replaceDocumentOperation = async (operation: OfflineOperation, acco
       const previous = existing[0]?.payload as Record<string, unknown> | undefined;
       result = { ...operation, payload: {
         ...(operation.payload as object),
-        ...(previous ? { baseUpdatedAt: previous.baseUpdatedAt, sync: previous.sync } : {})
+        ...(previous ? { baseUpdatedAt: previous.baseUpdatedAt, baseRevision: previous.baseRevision, sync: previous.sync } : {})
       } };
       for (const item of existing) store.delete(item.id);
       store.put(result);

@@ -16,7 +16,8 @@
     "migrations:status": "tsx scripts/run-migrations.ts status",
     "migrations:run:prod": "node dist/migrate.js run",
     "migrations:status:prod": "node dist/migrate.js status",
-    "test:migrations": "tsx --test tests/migrations.test.ts"
+    "test:migrations": "tsx --test tests/migrations.test.ts",
+    "test:integration": "tsx --test tests/documents.test.ts tests/lifecycle.test.ts"
   },
   "dependencies": {
     "@collab/shared": "*",
@@ -27,6 +28,7 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "lib0": "^0.2.117",
+    "nodemailer": "^10.5.0",
     "pg": "^8.12.0",
     "ws": "^8.18.0",
     "y-protocols": "^1.0.7",

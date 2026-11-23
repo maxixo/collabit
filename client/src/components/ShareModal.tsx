@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ShareToken } from "@shared/types";
+import { useModalAccessibility } from "../hooks/useModalAccessibility";
 import {
   generateShareToken,
+  getDocumentMembers,
   getShareTokens,
-  revokeShareToken
+  revokeShareToken,
+  removeDocumentMember,
+  updateDocumentMember,
+  type SharedMember
 } from "../services/share.service";
 
 interface ShareModalProps {
@@ -36,6 +41,8 @@ const formatExpiration = (value: string | null) => {
 };
 
 export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }: ShareModalProps) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalAccessibility(dialogRef, true, onClose);
   const [permission, setPermission] = useState<SharePermissionOption>("editor");
   const [expirationOption, setExpirationOption] = useState<ExpirationOption>("never");
   const [customExpiration, setCustomExpiration] = useState("");
@@ -43,11 +50,13 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
   const [customMaxUses, setCustomMaxUses] = useState("");
   const [generatedToken, setGeneratedToken] = useState<ShareToken | null>(null);
   const [activeTokens, setActiveTokens] = useState<ShareToken[]>([]);
+  const [members, setMembers] = useState<SharedMember[]>([]);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
   const [revokingToken, setRevokingToken] = useState<string | null>(null);
+  const [updatingMember, setUpdatingMember] = useState<string | null>(null);
 
   const normalizedWorkspaceId = workspaceId?.trim() || "default";
 
@@ -123,6 +132,11 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
     }
   }, [documentId, normalizedWorkspaceId]);
 
+  const refreshMembers = useCallback(async () => {
+    try { setMembers(await getDocumentMembers(documentId, normalizedWorkspaceId)); }
+    catch (error) { setErrorMessage(error instanceof Error ? error.message : "Failed to load collaborators"); }
+  }, [documentId, normalizedWorkspaceId]);
+
   useEffect(() => {
     setGeneratedToken(null);
     setCopiedToken(null);
@@ -131,7 +145,26 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
 
   useEffect(() => {
     void refreshTokens();
-  }, [refreshTokens]);
+    void refreshMembers();
+  }, [refreshMembers, refreshTokens]);
+
+  const handleMemberRole = async (member: SharedMember, role: SharedMember["role"]) => {
+    setUpdatingMember(member.userId);
+    try {
+      await updateDocumentMember(documentId, member.userId, role, normalizedWorkspaceId);
+      await refreshMembers();
+    } catch (error) { setErrorMessage(error instanceof Error ? error.message : "Failed to update collaborator"); }
+    finally { setUpdatingMember(null); }
+  };
+
+  const handleMemberRemove = async (member: SharedMember) => {
+    setUpdatingMember(member.userId);
+    try {
+      await removeDocumentMember(documentId, member.userId, normalizedWorkspaceId);
+      await refreshMembers();
+    } catch (error) { setErrorMessage(error instanceof Error ? error.message : "Failed to remove collaborator"); }
+    finally { setUpdatingMember(null); }
+  };
 
   const handleCopy = async (token: string) => {
     try {
@@ -213,6 +246,11 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
       data-testid="share-modal-backdrop"
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Share this document"
+        tabIndex={-1}
+        ref={dialogRef}
         className="max-w-xl w-full mx-4 bg-white dark:bg-[#16172d] rounded-2xl shadow-2xl overflow-hidden"
         onClick={(event) => event.stopPropagation()}
         data-testid="share-modal"
@@ -222,6 +260,24 @@ export const ShareModal = ({ documentId, workspaceId, onClose, onTokenRevoked }:
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
               <span className="material-symbols-outlined">share</span>
             </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#4c4d9a] dark:text-[#a1a1c9]">Collaborators</p>
+              <div className="mt-3 space-y-2">
+                {members.length === 0 ? <p className="text-xs text-[#4c4d9a] dark:text-[#a1a1c9]">No collaborators have joined yet.</p> : members.map((member) => (
+                  <div key={member.userId} className="flex items-center gap-3 rounded-lg border border-[#e7e7f3] p-3 dark:border-[#2a2b4a]">
+                    <span className="min-w-0 flex-1 truncate text-xs">{member.userId}</span>
+                    <select aria-label={`Role for ${member.userId}`} value={member.role} disabled={updatingMember === member.userId}
+                      onChange={(event) => void handleMemberRole(member, event.target.value as SharedMember["role"])}
+                      className="rounded border px-2 py-1 text-xs">
+                      <option value="viewer">Viewer</option><option value="editor">Editor</option>
+                    </select>
+                    <button type="button" disabled={updatingMember === member.userId} onClick={() => void handleMemberRemove(member)}
+                      className="text-xs font-semibold text-red-600 disabled:opacity-50">Remove</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div>
               <h2 className="text-lg font-bold text-[#0d0e1b] dark:text-white">Share this document</h2>
               <p className="text-sm text-[#4c4d9a] dark:text-[#a1a1c9]">

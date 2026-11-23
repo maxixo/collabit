@@ -19,7 +19,7 @@ export const useCreateDocumentAction = (workspaceId: string) => {
 
     try {
       const document = await createDocument({
-        title: "",
+        title: "Untitled document",
         workspaceId
       });
 

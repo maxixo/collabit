@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { JSONContent } from "@tiptap/core";
 import type { DocumentVersion } from "../services/history.service";
 import { getDocumentHistory, restoreDocumentVersion } from "../services/history.service";
+import { useModalAccessibility } from "../hooks/useModalAccessibility";
 
 interface HistoryModalProps {
+  revision?: number;
   isOpen: boolean;
   onClose: () => void;
   documentId: string;
@@ -15,6 +17,7 @@ interface HistoryModalProps {
 }
 
 export const HistoryModal = ({
+  revision,
   isOpen,
   onClose,
   documentId,
@@ -31,6 +34,11 @@ export const HistoryModal = ({
   const [selectedVersion, setSelectedVersion] = useState<DocumentVersion | null>(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
   const historyRequestIdRef = useRef(0);
+  const restoreMutation = useRef<{ key: string; id: string } | null>(null);
+  const historyDialogRef = useRef<HTMLDivElement>(null);
+  const restoreDialogRef = useRef<HTMLDivElement>(null);
+  useModalAccessibility(historyDialogRef, isOpen && !showRestoreConfirm, onClose);
+  useModalAccessibility(restoreDialogRef, isOpen && showRestoreConfirm, () => setShowRestoreConfirm(false));
 
   useEffect(() => {
     historyRequestIdRef.current += 1;
@@ -90,11 +98,13 @@ export const HistoryModal = ({
     setError(null);
 
     try {
+      const key = JSON.stringify([restoreDocumentId, selectedVersion.versionNumber, revision]);
+      if (restoreMutation.current?.key !== key) restoreMutation.current = { key, id: crypto.randomUUID() };
       const result = await restoreDocumentVersion(
         restoreDocumentId,
         selectedVersion.versionNumber,
         workspaceId,
-        { shareToken: shareToken ?? undefined }
+        { shareToken: shareToken ?? undefined, expectedRevision: revision, mutationId: restoreMutation.current.id }
       );
       onRestore({
         documentId: restoreDocumentId,
@@ -168,7 +178,12 @@ export const HistoryModal = ({
       />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div
-          className="relative flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#1e1f3a]"
+          ref={historyDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Document history"
+          tabIndex={-1}
+          className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#1e1f3a]"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -283,7 +298,7 @@ export const HistoryModal = ({
             aria-hidden="true"
           />
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#1e1f3a]">
+            <div ref={restoreDialogRef} role="dialog" aria-modal="true" aria-label="Confirm version restore" tabIndex={-1} className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#1e1f3a]">
               <div className="mb-4 flex items-center gap-3">
                 <span className="material-symbols-outlined text-3xl text-amber-500">warning</span>
                 <div>

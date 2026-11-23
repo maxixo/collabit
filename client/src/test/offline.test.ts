@@ -5,7 +5,7 @@ import { setOfflineAccount, getOfflineAccount, accountFetch, isCurrentAccount } 
 import { saveDocument, saveServerDocument, getDocument, listDocumentsByWorkspace, saveOperation, listOperations, exportLegacyDrafts, setMeta, getMeta } from "../offline/indexedDb";
 import { enqueueDocumentUpdate, flushDocumentQueue, getQueuedDocumentUpdate, retryQueuedDocument, discardQueuedDocument } from "../offline/documentQueue";
 import type { DocumentDetail } from "../services/document.service";
-import { flushStarQueue } from "../offline/starQueue";
+import { enqueueStarToggle, flushStarQueue } from "../offline/starQueue";
 import { indexDocument, searchDocumentsLocal } from "../offline/searchIndex";
 
 afterEach(() => setOfflineAccount(null));
@@ -93,7 +93,7 @@ test('legacy unscoped drafts are preserved only as an explicit unassigned export
 const body = (text: string) => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
 const draftInput = (text = "local work") => ({
   documentId: document.id, workspaceId: "default", title: "Local title", content: body(text),
-  updatedAtClient: "2026-01-02", baseUpdatedAt: document.updatedAt
+  updatedAtClient: "2026-01-02", baseUpdatedAt: document.updatedAt, baseRevision: 0
 });
 const withQueue = async (id: string, run: (server: { document: DocumentDetail; respond?: typeof fetch; patches: number }) => Promise<void>) => {
   setOfflineAccount(id);
@@ -102,13 +102,15 @@ const withQueue = async (id: string, run: (server: { document: DocumentDetail; r
   const onlineDescriptor = Object.getOwnPropertyDescriptor(navigator, "onLine");
   Object.defineProperty(globalThis, "window", { configurable: true, value: new EventTarget() });
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
-  const server: { document: DocumentDetail; respond?: typeof fetch; patches: number } = { document: { ...document, content: body("original") }, patches: 0 };
+  const server: { document: DocumentDetail; respond?: typeof fetch; patches: number } = { document: { ...document, content: body("original"), revision: 0 }, patches: 0 };
   globalThis.fetch = async (input, init) => {
     if (String(input).endsWith("/api/auth/me")) return Response.json({ user: { id } });
     if (server.respond) return server.respond(input, init);
     if (init?.method === "PATCH") {
+      if (JSON.parse(String(init.body)).expectedRevision !== server.document.revision)
+        return Response.json({ message: "Conflict", document: server.document }, { status: 409 });
       server.patches++;
-      server.document = { ...server.document, ...JSON.parse(String(init.body)), updatedAt: "2026-01-03" };
+      server.document = { ...server.document, ...JSON.parse(String(init.body)), revision: (server.document.revision ?? 0) + 1, updatedAt: "2026-01-03" };
       return Response.json({ document: server.document });
     }
     return Response.json({ document: server.document, accessRole: "owner" });
@@ -126,7 +128,7 @@ const withQueue = async (id: string, run: (server: { document: DocumentDetail; r
 test("conflicts retain local and server copies across account reloads and reads", async () => withQueue("conflict-owner", async (server) => {
   await saveDocument({ ...document, title: "Local title", content: body("local work") });
   await enqueueDocumentUpdate(draftInput());
-  server.document = { ...server.document, title: "Remote title", content: body("remote work"), updatedAt: "2026-01-02" };
+  server.document = { ...server.document, title: "Remote title", content: body("remote work"), updatedAt: "2026-01-02", revision: 1 };
   await flushDocumentQueue();
   await saveServerDocument(server.document);
   assert.equal((await getDocument(document.id))?.title, "Local title");
@@ -186,7 +188,7 @@ test("acknowledging an older save preserves edits queued during the request", as
   server.respond = async (_input, init) => {
     if (init?.method === "PATCH") {
       started(); await released;
-      server.document = { ...server.document, content: body("first edit"), updatedAt: "2026-01-03" };
+      server.document = { ...server.document, content: body("first edit"), updatedAt: "2026-01-03", revision: 1 };
     }
     return Response.json({ document: server.document, accessRole: "owner" });
   };
@@ -203,4 +205,39 @@ test("acknowledging an older save preserves edits queued during the request", as
   await flushDocumentQueue();
   assert.equal(await getQueuedDocumentUpdate(document.id), null);
   assert.deepEqual(server.document.content, body("newer edit"));
+}));
+
+test("a document replay reuses its mutation identity after a lost response", async () => withQueue("lost-response", async (server) => {
+  await enqueueDocumentUpdate(draftInput());
+  const identities: string[] = [];
+  server.respond = async (_input, init) => {
+    const payload = JSON.parse(String(init?.body));
+    identities.push(payload.mutationId);
+    if (identities.length === 1) {
+      server.document = { ...server.document, title: payload.title, content: payload.content, revision: 1 };
+      throw new TypeError("Response lost after commit");
+    }
+    return Response.json({ document: server.document });
+  };
+  await flushDocumentQueue();
+  assert.ok(await getQueuedDocumentUpdate(document.id));
+  await flushDocumentQueue();
+  assert.equal(identities.length, 2);
+  assert.equal(identities[0], identities[1]);
+  assert.equal(await getQueuedDocumentUpdate(document.id), null);
+}));
+
+test("star replay serializes concurrent flushes and retains a newer desired state", async () => withQueue("star-generations", async () => {
+  await enqueueStarToggle(document.id, "default", true);
+  let release!: () => void; let started!: () => void;
+  const entered = new Promise<void>((resolve) => { started = resolve; });
+  const delayed = new Promise<void>((resolve) => { release = resolve; });
+  const applied: boolean[] = [];
+  const first = flushStarQueue(async (entry) => { applied.push(entry.isStarred); started(); await delayed; });
+  await entered;
+  await enqueueStarToggle(document.id, "default", false);
+  const second = flushStarQueue(async (entry) => { applied.push(entry.isStarred); });
+  release(); await Promise.all([first, second]);
+  assert.deepEqual(applied, [true, false]);
+  assert.deepEqual(await listOperations(), []);
 }));

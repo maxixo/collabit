@@ -182,7 +182,7 @@ export const autoJoinDocumentViaShare = async (
   documentId: string,
   userId: string,
   shareToken: string,
-  permissionLevel: string
+  _permissionLevel: string
 ): Promise<boolean> => {
   if (!documentId || !userId || !shareToken) {
     return false;
@@ -193,63 +193,43 @@ export const autoJoinDocumentViaShare = async (
     return false;
   }
 
-  const validation = await validateShareToken(shareToken);
-  if (!validation.valid || validation.token.documentId !== documentId) {
-    return false;
-  }
+  const client = await db.connect();
+  let workspaceId = "";
+  try {
+    await client.query("BEGIN");
+    const document = await client.query(
+      `SELECT d.owner_id, ${schema.hasWorkspaceId ? "d.workspace_id" : "NULL AS workspace_id"}
+       FROM documents d WHERE d.id=$1 AND d.deleted_at IS NULL FOR UPDATE`, [documentId]);
+    if (!document.rows[0]) { await client.query("ROLLBACK"); return false; }
+    const row = document.rows[0] as { owner_id: string; workspace_id?: string };
+    workspaceId = row.workspace_id ?? "";
+    if (row.owner_id === userId) { await client.query("COMMIT"); return true; }
 
-  const { params, addParam } = createParamBuilder();
-  const idParam = addParam(documentId);
-  const workspaceSelect = schema.hasWorkspaceId ? "d.workspace_id" : "NULL AS workspace_id";
+    const existing = await client.query(
+      "SELECT role FROM document_members WHERE document_id=$1 AND user_id=$2 FOR UPDATE", [documentId, userId]);
+    if (existing.rows[0]) {
+      await client.query("COMMIT");
+      if (workspaceId) await joinWorkspaceViaShare(workspaceId, userId);
+      return true;
+    }
 
-  const { rows } = await db.query(
-    `
-      SELECT d.owner_id, ${workspaceSelect}
-      FROM documents d
-      WHERE d.id = ${idParam}
-      LIMIT 1
-    `,
-    params
-  );
+    const redeemed = await client.query(
+      `UPDATE share_tokens SET use_count=use_count+1
+       WHERE token=$1 AND document_id=$2
+         AND (expiration_date IS NULL OR expiration_date>NOW())
+         AND (max_uses IS NULL OR use_count<max_uses)
+       RETURNING permission_level`, [shareToken, documentId]);
+    if (!redeemed.rows[0]) { await client.query("ROLLBACK"); return false; }
+    const grantedPermission = String(redeemed.rows[0].permission_level);
+    const role = normalizeSharePermission(grantedPermission);
+    await client.query("INSERT INTO document_members(document_id,user_id,role) VALUES($1,$2,$3)", [documentId, userId, role]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally { client.release(); }
 
-  if (rows.length === 0) {
-    return false;
-  }
-
-  const row = rows[0] as { owner_id?: string; workspace_id?: string; workspaceId?: string };
-  const ownerId = typeof row.owner_id === "string" ? row.owner_id : "";
-  const workspaceId = schema.hasWorkspaceId
-    ? typeof row.workspace_id === "string"
-      ? row.workspace_id
-      : typeof row.workspaceId === "string"
-        ? row.workspaceId
-        : ""
-    : "";
-
-  if (ownerId && ownerId === userId) {
-    return true;
-  }
-
-  const resolvedPermission =
-    permissionLevel === "viewer" || permissionLevel === "editor" || permissionLevel === "owner"
-      ? permissionLevel
-      : validation.token.permissionLevel;
-
-  const role = normalizeSharePermission(resolvedPermission);
-
-  await db.query(
-    `
-      INSERT INTO document_members (document_id, user_id, role)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (document_id, user_id) DO NOTHING
-    `,
-    [documentId, userId, role]
-  );
-
-  if (workspaceId) {
-    await joinWorkspaceViaShare(workspaceId, userId);
-  }
-
+  if (workspaceId) await joinWorkspaceViaShare(workspaceId, userId);
   return true;
 };
 
@@ -328,7 +308,7 @@ export const getDocumentById = async (
 
   const { rows } = await db.query(
     `
-      SELECT d.id, d.title, d.content, d.updated_at, d.owner_id, ${workspaceSelect}, ${starSelect}
+      SELECT d.id, d.title, d.content, d.revision, d.updated_at, d.owner_id, ${workspaceSelect}, ${starSelect}
       FROM documents d
       ${joinClause}
       ${starJoin}
@@ -380,8 +360,8 @@ export const createDocument = async (payload: {
     values.push("NOW()");
 
     const returningFields = schema.hasWorkspaceId
-      ? "id, title, content, updated_at, owner_id, workspace_id"
-      : "id, title, content, updated_at, owner_id";
+      ? "id, title, content, revision, updated_at, owner_id, workspace_id"
+      : "id, title, content, revision, updated_at, owner_id";
 
     const { rows } = await client.query(
       `
@@ -417,99 +397,12 @@ export const createDocument = async (payload: {
   }
 };
 
-export const updateDocument = async (payload: {
-  id: string;
-  workspaceId: string;
-  title?: string;
-  content?: TipTapContent;
-}): Promise<DocumentModel | null> => {
-  const schema = await getDocumentSchemaInfo();
-  const { params, addParam } = createParamBuilder();
-  const idParam = addParam(payload.id);
-  const titleParam = addParam(payload.title ?? null);
-  const contentParam = addParam(payload.content ? JSON.stringify(payload.content) : null);
-  const contentExpression = schema.contentType === "jsonb" ? `${contentParam}::jsonb` : contentParam;
-  let workspaceClause = "";
-  if (schema.hasWorkspaceId) {
-    const workspaceParam = addParam(payload.workspaceId);
-    workspaceClause = `AND workspace_id = ${workspaceParam}`;
-  }
-  const deletedClause = schema.hasDeletedAt ? "AND deleted_at IS NULL" : "";
-  const returningFields = schema.hasWorkspaceId
-    ? "id, title, content, updated_at, owner_id, workspace_id"
-    : "id, title, content, updated_at, owner_id";
-
-  const { rows } = await db.query(
-    `
-      UPDATE documents
-      SET title = COALESCE(${titleParam}, title),
-          content = COALESCE(${contentExpression}, content),
-          updated_at = NOW()
-      WHERE id = ${idParam}
-      ${workspaceClause}
-      ${deletedClause}
-      RETURNING ${returningFields}
-    `,
-    params
+export const setStarDocument = async (documentId: string, userId: string, isStarred: boolean): Promise<{ isStarred: boolean }> => {
+  if (isStarred) await db.query(
+    "INSERT INTO starred_documents (document_id,user_id) VALUES($1,$2) ON CONFLICT(document_id,user_id) DO NOTHING", [documentId,userId]
   );
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  const document = mapDocumentRow(rows[0]);
-  if (!schema.hasWorkspaceId) {
-    document.workspaceId = payload.workspaceId;
-  }
-  return document;
-};
-
-export const toggleStarDocument = async (
-  documentId: string,
-  userId: string
-): Promise<{ isStarred: boolean }> => {
-  const schema = await getDocumentSchemaInfo();
-  if (!schema.hasStarredDocuments) {
-    throw new Error("Starred documents table is not available.");
-  }
-
-  const { params, addParam } = createParamBuilder();
-  const documentParam = addParam(documentId);
-  const userParam = addParam(userId);
-
-  const { rows } = await db.query(
-    `
-      SELECT 1
-      FROM starred_documents
-      WHERE document_id = ${documentParam}
-        AND user_id = ${userParam}
-      LIMIT 1
-    `,
-    params
-  );
-
-  if (rows.length > 0) {
-    await db.query(
-      `
-        DELETE FROM starred_documents
-        WHERE document_id = ${documentParam}
-          AND user_id = ${userParam}
-      `,
-      params
-    );
-    return { isStarred: false };
-  }
-
-  await db.query(
-    `
-      INSERT INTO starred_documents (document_id, user_id)
-      VALUES (${documentParam}, ${userParam})
-      ON CONFLICT (document_id, user_id) DO NOTHING
-    `,
-    params
-  );
-
-  return { isStarred: true };
+  else await db.query("DELETE FROM starred_documents WHERE document_id=$1 AND user_id=$2", [documentId,userId]);
+  return { isStarred };
 };
 
 export const getStarredDocuments = async (

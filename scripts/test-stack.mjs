@@ -36,8 +36,8 @@ const port = () => new Promise((resolve, reject) => {
   });
 });
 
-const launch = (args, cwd, env, label) => {
-  const child = spawn(process.execPath, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const launch = (args, cwd, env, label, { ipc = false } = {}) => {
+  const child = spawn(process.execPath, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', ...(ipc ? ['ipc'] : [])] });
   children.add(child);
   child.stdout.on('data', (data) => log.write(`[${label}] ${data}`));
   child.stderr.on('data', (data) => log.write(`[${label}] ${data}`));
@@ -119,6 +119,7 @@ try {
   const app = `http://127.0.0.1:${appPort}`;
   const env = {
     ...process.env, NODE_ENV: 'test', PORT: String(apiPort), DATABASE_URL: connection.toString(),
+    API_DOCUMENT_RATE_LIMIT: '10000',
     AUTH_SECRET: 'isolated-test-stack-secret-more-than-32-characters', JWT_SECRET: 'isolated-test-stack-jwt-more-than-32-characters',
     AUTH_BASE_URL: api, CORS_ORIGINS: app, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '',
     VITE_API_BASE_URL: api, VITE_WS_URL: `ws://127.0.0.1:${apiPort}/ws`,
@@ -130,11 +131,73 @@ try {
   if (reuseServer) await fs.access(path.join(root, 'server/dist/server.js'));
   await run([process.env.npm_execpath, 'run', 'build', ...(reuseServer ? ['--workspace', 'client'] : [])], root, env, 'build');
   await run(['dist/migrate.js', 'run'], path.join(root, 'server'), env, 'migrate');
+  if (process.argv.includes('--with-migrations'))
+    await run([process.env.npm_execpath, 'run', 'test:migrations', '--workspace', 'server'], root,
+      { ...env, MIGRATION_TEST_DATABASE_URL: adminUrl }, 'migration-tests');
+  await run([process.env.npm_execpath, 'run', 'test:integration', '--workspace', 'server'], root, env, 'integration');
   const backend = launch(['dist/server.js'], path.join(root, 'server'), env, 'api');
   const frontend = launch([path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(appPort), '--strictPort'], path.join(root, 'client'), env, 'client');
   await Promise.all([ready(`${api}/ready`, backend), ready(app, frontend)]);
   console.info('Fresh database and application servers ready. Running browser/API checks...');
-  await run([process.env.npm_execpath, 'run', 'test:e2e', '--workspace', 'client', '--', ...process.argv.slice(2).filter((arg) => arg !== '--reuse-server-build')], root, env, 'playwright');
+  await run([process.env.npm_execpath, 'run', 'test:e2e', '--workspace', 'client', '--', ...process.argv.slice(2).filter((arg) => !['--reuse-server-build', '--with-migrations'].includes(arg))], root, env, 'playwright');
+  if (cluster?.started) {
+    const restoreName = `mvp_restore_${randomUUID().replaceAll('-', '')}`;
+    const backupPath = path.join(cluster.directory, 'acceptance-backup.dump');
+    await admin.query(`CREATE DATABASE "${restoreName}"`);
+    const restoreUrl = new URL(connection.toString());
+    restoreUrl.pathname = `/${restoreName}`;
+    const sourcePool = new Pool({ connectionString: connection.toString() });
+    const restoredPool = new Pool({ connectionString: restoreUrl.toString() });
+    try {
+      await native(path.join(cluster.bin, 'pg_dump'), ['--format=custom', '--no-owner', '--no-acl', '--file', backupPath, '--dbname', connection.toString()]);
+      await native(path.join(cluster.bin, 'pg_restore'), ['--exit-on-error', '--single-transaction', '--no-owner', '--no-acl', '--dbname', restoreUrl.toString(), backupPath]);
+      for (const table of ['user', 'documents', 'document_members', 'document_versions', 'document_suggestions']) {
+        const sourceRows = await sourcePool.query(`SELECT count(*)::int AS count FROM "${table}"`);
+        const restoredRows = await restoredPool.query(`SELECT count(*)::int AS count FROM "${table}"`);
+        if (sourceRows.rows[0].count !== restoredRows.rows[0].count)
+          throw new Error(`Backup restore row count differs for ${table}`);
+      }
+      const restoredPort = await port();
+      const restoredApi = `http://127.0.0.1:${restoredPort}`;
+      const restoredBackend = launch(['dist/server.js'], path.join(root, 'server'), {
+        ...env, PORT: String(restoredPort), DATABASE_URL: restoreUrl.toString(), AUTH_BASE_URL: restoredApi
+      }, 'restore-api', { ipc: true });
+      await ready(`${restoredApi}/ready`, restoredBackend);
+      const health = await fetch(`${restoredApi}/health`);
+      if (health.status !== 200) throw new Error(`Restored API liveness check returned ${health.status}`);
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Restored API did not stop after SIGTERM')), 10_000);
+        restoredBackend.once('exit', (code) => {
+          clearTimeout(timeout);
+          code === 0 ? resolve() : reject(new Error(`Restored API exited with ${code}`));
+        });
+        if (!restoredBackend.connected) {
+          clearTimeout(timeout);
+          reject(new Error('Restored API IPC channel was not available for graceful shutdown'));
+          return;
+        }
+        restoredBackend.send('shutdown');
+      });
+      console.info('Custom-format backup restored to a disposable DB; core rows match and the API passed liveness/readiness on restored data.');
+    } finally {
+      await sourcePool.end();
+      await restoredPool.end();
+      await admin.query(`DROP DATABASE "${restoreName}" WITH (FORCE)`);
+    }
+
+    await admin.query(`DROP DATABASE "${database}" WITH (FORCE)`);
+    created = false;
+    await admin.end();
+    admin = undefined;
+    await native(path.join(cluster.bin, 'pg_ctl'), ['-D', path.join(cluster.directory, 'data'), '-m', 'fast', '-w', 'stop']);
+    cluster.started = false;
+    const [liveness, readiness] = await Promise.all([fetch(`${api}/health`), fetch(`${api}/ready`)]);
+    if (liveness.status !== 200 || readiness.status !== 503)
+      throw new Error(`Database outage should retain liveness and fail readiness (health=${liveness.status}, ready=${readiness.status})`);
+    console.info('Database outage keeps liveness healthy and returns 503 from readiness.');
+  } else {
+    console.info('Skipping local backup/restore and database-outage rehearsals: this run does not own its PostgreSQL server.');
+  }
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

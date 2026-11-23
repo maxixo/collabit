@@ -1,0 +1,15 @@
+.git
+.gitignore
+.mvp-worktrees
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/test-results
+**/playwright-report
+.env
+.env.*
+!.env.example
+*.log
+*.zip
+.DS_Store

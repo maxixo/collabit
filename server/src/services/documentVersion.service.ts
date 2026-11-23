@@ -198,6 +198,7 @@ export const createDocumentVersion = async (
   try {
     await poolClient.query("BEGIN");
 
+    await poolClient.query("SELECT id FROM documents WHERE id=$1 FOR UPDATE", [documentId]);
     const version = await insertDocumentVersion(
       poolClient,
       documentId,
@@ -216,60 +217,6 @@ export const createDocumentVersion = async (
     throw error;
   } finally {
     poolClient.release();
-  }
-};
-
-/**
- * Restore a document to a specific version
- */
-export const restoreDocumentVersion = async (
-  documentId: string,
-  versionNumber: number,
-  workspaceId: string
-): Promise<Record<string, unknown>> => {
-  logger.info(`[DocumentVersion] 🔄 Restoring version ${versionNumber} for doc=${documentId}`);
-  
-  const client = await db.connect();
-
-  try {
-    await client.query("BEGIN");
-
-    // Get the version to restore
-    const version = await getDocumentVersion(documentId, versionNumber, workspaceId, client);
-    if (!version) {
-      logger.error(`[DocumentVersion] ❌ Version ${versionNumber} not found for ${documentId}`);
-      throw new Error("Version not found");
-    }
-
-    // Update the documents table with the restored content
-    const updateQuery = `
-      UPDATE documents
-      SET content = $1, updated_at = NOW()
-      WHERE id = $2 AND workspace_id = $3
-      RETURNING id
-    `;
-
-    await client.query(updateQuery, [JSON.stringify(version.content), documentId, workspaceId]);
-
-    // Create a new version for the restore action
-    await createDocumentVersion(
-      documentId,
-      version.title,
-      version.content,
-      "system", // System-generated version
-      workspaceId,
-      client
-    );
-
-    await client.query("COMMIT");
-    logger.info(`[DocumentVersion] ✅ Version ${versionNumber} restored for ${documentId}`);
-    return version.content;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    logger.error("Failed to restore document version", error);
-    throw error;
-  } finally {
-    client.release();
   }
 };
 

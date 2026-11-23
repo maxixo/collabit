@@ -33,7 +33,7 @@ for (const resolution of ["duplicate", "server"] as const) {
       await typeInEditor(owner.page, " local draft");
       await expect.poll(async () => JSON.stringify(await drafts(owner.page))).toContain("local draft");
       const remote = await owner.context.request.patch(`${API_BASE_URL}/api/documents/${doc.id}?workspaceId=default`, {
-        data: { title: "Remote title", content: createParagraphDocument("remote body") }
+        data: { title: "Remote title", content: createParagraphDocument("remote body"), expectedRevision: doc.revision, mutationId: crypto.randomUUID() }
       });
       expect(remote.ok(), await remote.text()).toBeTruthy();
       await owner.context.setOffline(false);

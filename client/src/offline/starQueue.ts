@@ -1,55 +1,37 @@
-import { createOfflineQueue, type OfflineQueueItem } from "./offlineQueue";
-import { getOfflineAccount, isCurrentAccount, verifyOfflineSession } from "./accountScope";
-
-const STAR_QUEUE_TYPE = "star_toggle";
-
-type StarQueuePayload = {
-  type: typeof STAR_QUEUE_TYPE;
-};
+import { createOfflineQueue } from "./offlineQueue";
+import { getOfflineAccount, isCurrentAccount, verifyOfflineSession, type OfflineAccount } from "./accountScope";
+import { getDocumentRecord } from "./indexedDb";
 
 const queue = createOfflineQueue();
+const flights = new Map<OfflineAccount, Promise<void>>();
+export const enqueueStarToggle = (documentId: string, workspaceId: string, isStarred: boolean) =>
+  queue.enqueue({ documentId, workspaceId, payload: { type: "star_set", isStarred } });
 
-const isStarQueueItem = (item: OfflineQueueItem): item is OfflineQueueItem & { payload: StarQueuePayload } => {
-  const payload = item.payload as Partial<StarQueuePayload> | null;
-  return payload?.type === STAR_QUEUE_TYPE;
-};
-
-export const enqueueStarToggle = async (documentId: string, workspaceId: string) => {
-  return queue.enqueue({
-    documentId,
-    workspaceId,
-    payload: { type: STAR_QUEUE_TYPE }
-  });
-};
-
-export const flushStarQueue = async (
-  handler: (entry: { documentId: string; workspaceId: string }) => Promise<void>
+export const flushStarQueue = (
+  handler: (entry: { documentId: string; workspaceId: string; isStarred: boolean }) => Promise<void>
 ) => {
   const account = getOfflineAccount();
-  const items = await queue.list(account);
-  const starItems = items.filter(isStarQueueItem);
-  if (!starItems.length || !await verifyOfflineSession(account)) return;
-  const grouped = new Map<string, { documentId: string; workspaceId: string; ids: string[] }>();
-
-  for (const item of starItems) {
-    const workspaceId = item.workspaceId ?? "default";
-    const key = `${workspaceId}:${item.documentId}`;
-    const existing = grouped.get(key);
-    if (existing) {
-      existing.ids.push(item.id);
-    } else {
-      grouped.set(key, { documentId: item.documentId, workspaceId, ids: [item.id] });
-    }
-  }
-
-  for (const entry of grouped.values()) {
+  const run = async () => {
     if (!isCurrentAccount(account)) return;
-    if (entry.ids.length % 2 === 1) {
-      await handler({ documentId: entry.documentId, workspaceId: entry.workspaceId });
-    }
-    for (const id of entry.ids) {
+    const items = (await queue.list(account)).filter((item) => {
+      const payload = item.payload as { type?: string };
+      return payload?.type === "star_set" || payload?.type === "star_toggle";
+    });
+    if (!items.length || !await verifyOfflineSession(account)) return;
+    const grouped = new Map<string, typeof items>();
+    for (const item of items) grouped.set(item.documentId, [...(grouped.get(item.documentId) ?? []), item]);
+    for (const entries of grouped.values()) {
       if (!isCurrentAccount(account)) return;
-      await queue.remove(id, account);
+      const latest = entries[entries.length - 1];
+      const payload = latest.payload as { isStarred?: boolean };
+      const desired = payload.isStarred ?? (await getDocumentRecord(latest.documentId, account))?.isStarred;
+      if (typeof desired !== "boolean") continue;
+      await handler({ documentId: latest.documentId, workspaceId: latest.workspaceId ?? "default", isStarred: desired });
+      if (!isCurrentAccount(account)) return;
+      for (const entry of entries) await queue.remove(entry.id, account);
     }
-  }
+  };
+  const next = (flights.get(account) ?? Promise.resolve()).catch(() => {}).then(run);
+  flights.set(account, next);
+  return next.finally(() => { if (flights.get(account) === next) flights.delete(account); });
 };

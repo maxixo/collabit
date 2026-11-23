@@ -115,3 +115,28 @@ export const logout = async (): Promise<void> => {
     credentials: "include"
   });
 };
+
+export const requestPasswordReset = async (email: string): Promise<{ message: string }> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/password/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ email })
+  });
+  return parseJson<{ message: string }>(response);
+};
+
+export const resetPassword = async (token: string, newPassword: string): Promise<{ message: string }> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/password/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ token, newPassword })
+  });
+  return parseJson<{ message: string }>(response);
+};
+
+export const getAuthProviders = async (): Promise<{ google: boolean }> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/providers`, { credentials: "include" });
+  return parseJson<{ google: boolean }>(response);
+};

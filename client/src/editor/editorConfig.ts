@@ -81,7 +81,8 @@ export const createEditorExtensions = (options?: {
   if (options?.collaboration?.doc) {
     extensions.push(
       Collaboration.configure({
-        document: options.collaboration.doc
+        document: options.collaboration.doc,
+        field: "content"
       })
     );
 

@@ -18,6 +18,7 @@ export interface DocumentSummary {
 }
 
 export interface DocumentDetail extends DocumentSummary {
+  revision?: number;
   content: TipTapContent;
   accessRole?: DocumentAccessRole;
 }
@@ -25,7 +26,7 @@ export interface DocumentDetail extends DocumentSummary {
 export type DocumentAccessRole = "viewer" | "editor" | "owner";
 
 export class DocumentRequestError extends Error {
-  constructor(message: string, public readonly status: number) { super(message); }
+  constructor(message: string, public readonly status: number, public readonly document?: DocumentDetail) { super(message); }
 }
 
 const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? "http://localhost:4000";
@@ -37,7 +38,7 @@ const parseJson = async <T>(response: Response): Promise<T> => {
   if (!response.ok) {
     const message =
       (data as { message?: string }).message ?? "Document request failed";
-    throw new DocumentRequestError(message, response.status);
+    throw new DocumentRequestError(message, response.status, (data as { document?: DocumentDetail }).document);
   }
   return data;
 };
@@ -225,9 +226,10 @@ export const fetchDocumentById = async (
   }
 };
 
-export const toggleStarDocument = async (
+export const setStarDocument = async (
   documentId: string,
-  workspaceId: string
+  workspaceId: string,
+  isStarred: boolean
 ): Promise<{ documentId: string; isStarred: boolean }> => {
   const response = await accountFetch(
     `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/star?workspaceId=${encodeURIComponent(
@@ -235,6 +237,8 @@ export const toggleStarDocument = async (
     )}`,
     {
       method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isStarred }),
       credentials: "include"
     }
   );
@@ -268,6 +272,8 @@ export const updateDocument = async (payload: {
   workspaceId: string;
   title?: string;
   content?: TipTapContent;
+  expectedRevision: number;
+  mutationId: string;
 }, options?: { signal?: AbortSignal; shareToken?: string; account?: OfflineAccount }): Promise<DocumentDetail> => {
   const response = await accountFetch(
     buildDocumentUrl(payload.id, payload.workspaceId, options?.shareToken),
@@ -278,7 +284,9 @@ export const updateDocument = async (payload: {
       signal: options?.signal,
       body: JSON.stringify({
         title: payload.title,
-        content: payload.content
+        content: payload.content,
+        expectedRevision: payload.expectedRevision,
+        mutationId: payload.mutationId
       })
     }, options?.account
   );
@@ -288,5 +296,17 @@ export const updateDocument = async (payload: {
     await safeStore(() => saveDocument(data.document, responseAccount(response)));
   }
   responseAccount(response);
+  return data.document;
+};
+
+export const mergeDocument = async (
+  id: string, workspaceId: string, yjsUpdate: number[], options?: { shareToken?: string; account?: OfflineAccount }
+): Promise<DocumentDetail> => {
+  const params = new URLSearchParams({ workspaceId });
+  if (options?.shareToken) params.set("token", options.shareToken);
+  const response = await accountFetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(id)}/sync?${params}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ yjsUpdate })
+  }, options?.account);
+  const data = await parseJson<{ document: DocumentDetail }>(response);
   return data.document;
 };

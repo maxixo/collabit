@@ -7,6 +7,7 @@ type TestUser = {
 };
 
 type CreatedDocument = {
+  revision: number;
   id: string;
   title: string;
   updatedAt: string;
@@ -148,8 +149,12 @@ export const expectNoCrashScreen = async (page: Page) => {
   await expect(page.getByText("Cannot read properties of null")).toHaveCount(0);
 };
 
-export const createAuthenticatedPage = async (browser: Browser, label: string) => {
-  const context = await browser.newContext();
+export const createAuthenticatedPage = async (
+  browser: Browser,
+  label: string,
+  options: { serviceWorkers?: "allow" | "block" } = {}
+) => {
+  const context = await browser.newContext(options);
   const user = makeUser(label);
   await signUpViaApi(context.request, user);
   const page = await context.newPage();

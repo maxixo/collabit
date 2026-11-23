@@ -20,6 +20,15 @@ Follow the [commit-by-commit plan](docs/mvp-commit-plan.md) for the remaining MV
 
 The release target is a Vercel frontend and one Node backend process on a VPS. Complete the MVP acceptance checks before deploying production.
 
+For the VPS backend image, PostgreSQL Compose services, migration job, and Nginx TLS/WebSocket proxy setup, see the [VPS deployment guide](server/deployment-vps.md).
+
+For Vercel project settings, public frontend environment variables, DNS/OAuth configuration, production smoke checks, and release rollback steps, see the [deployment guide](deploy/deployment-guide.md).
+
+For health checks, redacted logs, encrypted backup scheduling, disposable restore rehearsal, restart, and rollback procedures, see the [backend operations runbook](server/ops-runbook.md).
+
+See the [release acceptance record](deploy/release-acceptance.md) for the latest verified gates and the remaining deployment prerequisites.
+
+
 ## Local Development
 
 ### Prerequisites
@@ -36,8 +45,11 @@ Create `.env` from `.env.example` and set:
 - `AUTH_SECRET`
 - `AUTH_BASE_URL`
 - `CORS_ORIGINS`
+- `CLIENT_BASE_URL`
 - `VITE_API_BASE_URL`
 - `VITE_WS_URL`
+
+Password recovery sends one-hour reset links through SMTP. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`, and, when required by the provider, `SMTP_USER` and `SMTP_PASSWORD`. For local development, point SMTP at Mailpit on port 1025; configure a verified sender and provider credentials before enabling public signup in production.
 
 Optional for Google OAuth:
 
